@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Build everything: Rails dependencies + ledger_core (SPARK Ada).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+bundle install
+(cd ledger_core && alr build)
