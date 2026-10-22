@@ -12,15 +12,18 @@ echo "== Rails: gem audit"
 bin/bundler-audit
 echo "== Rails: importmap audit"
 bin/importmap audit
+echo "== ledger_core: shared library for Ruby FFI (needed by the Rails tests)"
+(cd ledger_core && LEDGER_CORE_LIBRARY_TYPE=relocatable alr build --validation)
 echo "== Rails: tests (100% line+branch coverage required)"
 RAILS_ENV=test COVERAGE=1 bin/rails db:prepare test
-echo "== ledger_core: build"
+echo "== ledger_core: build (validation profile, warnings are errors)"
 (cd ledger_core && alr build --validation)
 echo "== ledger_core: SPARK proof"
-if command -v gnatprove >/dev/null; then
-  (cd ledger_core && alr exec -- gnatprove -P ledger_core.gpr --level=2 --warnings=error)
-else
-  echo "gnatprove not installed; refusing to pass" >&2
-  exit 1
-fi
+(cd ledger_core && alr exec -- gnatprove -P ledger_core.gpr --level=4 --warnings=error -j0)
+echo "== ledger_core: unit tests"
+(cd ledger_core/tests && alr build --validation && ./bin/tests)
+echo "== ledger_core: shared library for Ruby FFI"
+(cd ledger_core && LEDGER_CORE_LIBRARY_TYPE=relocatable alr build --validation)
+echo "== ledger_core: differential test against the pure-Ruby reference"
+ruby ledger_core/tests/differential/diff_test.rb ledger_core/lib/libLedger_Core.so
 echo "All checks passed."

@@ -1,0 +1,17 @@
+<% content_for :title, "Income statement" %>
+<h1>Income statement</h1>
+<%= render "statements/nav" %>
+<%= render "statements/period_header", report: @report %>
+<p id="method">Realized gain uses the <strong><%= cost_basis_label(@report.cost_basis_method) %></strong> cost basis method
+  (<%= link_to "change in settings", settings_path %>).</p>
+
+<table id="income-statement">
+  <caption class="visually-hidden">Income statement</caption>
+  <tbody>
+    <tr><td>Realized gain / loss</td><td class="num" id="is-realized"><%= format_cents(@report.income.realized_gain) %></td></tr>
+    <tr><td>Unrealized gain / loss</td><td class="num" id="is-unrealized"><%= format_cents(@report.income.unrealized_gain) %></td></tr>
+    <tr class="total"><td>Total trading gain / loss</td><td class="num" id="is-gain"><%= format_cents(@report.income.trading_gain_total) %></td></tr>
+    <tr><td>Trading costs (spread and fees)</td><td class="num" id="is-costs"><%= format_cents(@report.costs_shown) %></td></tr>
+    <tr class="total"><td>Net income</td><td class="num" id="is-net"><%= format_cents(@report.income.net_income) %></td></tr>
+  </tbody>
+</table>

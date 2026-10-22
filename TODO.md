@@ -2,118 +2,139 @@
 
 Legend: `[x]` done, `[ ]` not started.
 
-## Done
+## ⚠️ Needs Jonathan's review
 
-- [x] Rails 8.1 app generated (SQLite, Hotwire, importmap)
-- [x] `ledger_core` Alire crate created; SPARK types + `Is_Balanced` spec stub builds
-- [x] README describes the product and architecture
+Assumptions and deviations made while you were away. Please skim and overrule
+anything you disagree with. Nothing is committed; all changes are in the working tree.
 
-## Decisions (made)
+### Decisions I made where your answers left a gap
 
-- **Bridge:** C-ABI shared library exported from Ada (`Convention => C`), loaded
-  in Rails via Ruby `ffi`.
-- **Persistence:** Rails persists postings in SQLite; the engine validates every
-  transaction (balanced, cash and holdings never negative) before Rails commits.
-- **Price index:** in-process Ruby class behind an interface (swappable later).
-- **Price ticks:** scheduled Solid Queue job; one shared price history for all users.
-- **Trading:** users buy and sell whole rounds at the current price, with a
-  spread/fee. No shorting, no borrowing. Fees post to a Fee Expense account and
-  appear on the income statement and cash flow statement.
-- **Calibers:** a large seed set (15+), see below.
-- **Time:** real wall-clock time; ticks every N minutes.
-- **Valuation:** mark-to-market, revalued every tick (unrealized gain/loss posts
-  to the ledger), while also tracking cost basis per holding for realized gains.
-- **Cost basis method:** per-user runtime setting, **weighted average or FIFO**,
-  changeable at any time. Applies to every view, including the statements.
-- **Chart history:** kept indefinitely (design ceiling: 128 years). Range
-  options: past day, week, month, YTD, year, and MAX.
+1. **Tick interval 5 min; spread 0.5% + fee 1% per trade** (the defaults I proposed;
+   `config.x.spread_bps = 50`, `config.x.fee_bps = 100`, `config.x.tick_interval_minutes = 5`).
+   The 5-minute schedule is duplicated in `config/recurring.yml`; change both.
+2. **Spread and fee are both booked as "Trading Costs"** (expense) on top of the
+   market value of the ammo, so holdings are carried at market value and a trade
+   does not create an instant unrealized loss.
+3. **Price unit is the centicent (1/100 cent per round)**, not whole cents, so cheap
+   rounds (.22 LR ≈ 10¢) can move by realistic amounts. Money is still integer cents.
+   Value of a position = round-half-up(qty × price / 100).
+4. **Cost basis (both methods)** is computed by replaying the trade history in
+   the engine, per the user's current setting; the ledger itself is method-independent.
+   Net worth and net income are identical under both methods; only the
+   realized/unrealized split differs (verified with hand-computed fixtures).
+5. **Seed calibers and prices** are my plausible guesses (e.g. 9mm $0.25, .22 LR
+   $0.10, 12 ga $0.35); the mock price walk is ±2% per tick, clamped to $0.01–$10.00
+   per round, seeded from `config.x.price_index_seed = 1776`.
+6. **Indefinite history:** raw ticks are kept for 7 days, then rolled up into
+   hourly/daily/weekly OHLC buckets (nothing deleted). Chart resolution: 1D/1W raw,
+   1M hourly, YTD/1Y daily, MAX weekly.
+7. **Retained earnings** are derived (income − expense to date); there are no
+   period-closing entries. Equity = Owner's Capital + net income to date.
 
-## Still to pin down (defaults proposed; change if you disagree)
+### Deviations from the stated principles
 
-- [ ] Tick interval N: **5 minutes**
-- [ ] Fee model: flat **1% of trade value per buy or sell**, rounded half-up to
-      the cent, plus a bid/ask spread of **0.5% each side** of the index price
-- [ ] Cost basis implementation: the ledger records every purchase as a **lot**.
-      Holdings are marked to market, so balances and net worth don't depend on
-      the method; only the realized/unrealized gain split does. Proposal: compute
-      that split by replaying lots under the user's chosen method, so both
-      methods yield balanced statements. Confirm this (vs. posting under one
-      canonical method).
-- [ ] Seed calibers (15): .22 LR, .17 HMR, .223/5.56x45, .300 BLK, 7.62x39,
-      .308/7.62x51, .30-06, 6.5 Creedmoor, .243 Win, 9mm, .40 S&W, .45 ACP,
-      .380 ACP, 12 gauge, 20 gauge
-- [ ] Storage scale: 128 years at 5-minute ticks is ~13.5M ticks per caliber
-      (~200M rows for 15 calibers). Proposal: keep raw ticks for recent data and
-      roll older data up into OHLC buckets (hour/day/week) so charts stay fast
-      with nothing deleted. Same idea for per-user net worth history, or compute
-      it on demand from the ledger. Confirm.
-- [ ] Chart of accounts additions: Fee Expense, Cost Basis tracking per caliber
+8. **All money/price/quantity math is in the SPARK engine** (you asked for this
+   after the first version). Rails stores and retrieves integers and calls the
+   engine; running cumulative totals per transaction replace every SQL `SUM`.
+   `test/architecture/no_money_math_test.rb` is a ratchet that fails on arithmetic
+   in `app/`; its allowlist (`test/architecture/math_allowlist.yml`, 20 entries)
+   holds only calendar/time math and engine bindings. Please skim the allowlist.
+   Remaining in Ruby by design: calendar/time-zone arithmetic, SHA-256 randomness
+   (the engine maps it to a bounded change), string assembly, comparisons for control flow.
+9. **Proof status:** all 1081 checks proved at GNATprove `--level=4` (CVC5/Z3/
+   Alt-Ergo), no `Assume`/`Annotate`/`Suppress`. Caveats: (a) the C export shim
+   (`ledger_core-c_api`) is not SPARK (it only marshals, null-checks and catches
+   exceptions); (b) contracts/ghost code are compiled out of the shipped library
+   (`ledger_core.adc` `Assertion_Policy (Ignore)`) because evaluating them made
+   `cost_basis` cubic; they are proved, and overflow/range/index checks stay on;
+   (c) ghost code has no direct unit tests (covered by proof and the differential
+   test); (d) a level-4 proof takes about 7.5 minutes, and building in
+   `ledger_core/obj` while it runs breaks it ("no checks generated").
+10. **Append-only postings are enforced in Rails models only** (update/destroy
+    raise); `update_all`, `delete_all` and raw SQL bypass it. No DB triggers
+    (`schema.rb` wouldn't carry them).
+11. **Holdings carrying value can differ from exact market value by ≤ 1¢ per
+    caliber right after a trade**, until the next tick's revaluation, because the
+    sold/bought portion and the remainder are rounded separately. Balances still
+    always balance.
+12. **Engine limits (new, much larger):** no trade-count or caliber limit and
+    `cost_basis` is linear, but trades must be ordered by caliber then time;
+    holdings are capped at 10^9 rounds per caliber, totals at 10^17 cents (cells
+    at 2.5e16). A buy past 10^9 rounds is refused with a message. The Rails trade
+    limit was removed.
+13. **Statements:** all times are UTC; periods are `(from, to]`; a custom `from`/`to`
+    date covers whole days; a start before the account began is clamped (with a
+    note); future end dates, end ≤ start, and bad input return 422 with a message.
+    Engine check failures (`Unbalanced`, `Not_Reconciled`) deliberately raise
+    (500) rather than render a statement.
+14. **Auth:** I used Rails 8's generator but removed password-reset, mailers and
+    ActionCable (no mail setup; untested code isn't allowed by the coverage gate).
+    Login column is `email_address`, min password length 8, login/signup rate
+    limited to 10 per 3 minutes. There is no email verification and no password reset.
+15. **Net worth chart** does one indexed as-of lookup per sample (≤ 200 points + 1
+    query), then the engine's balance sheet; it rejects accounts that start
+    before 1970 (engine `sample_times` needs start ≥ 0).
+16. **Dev environment:** Solid Queue runs inside Puma in development
+    (`SOLID_QUEUE_IN_PUMA=""` opts out); `config/database.yml` gained a dev queue DB;
+    the test cache store is now `:memory_store` (for rate-limit tests).
+17. **Ledger errors from the engine for out-of-range quotes** (price > 10^7 or
+    value > 10^12) would show as a 500 rather than a friendly message. Unreachable
+    with the mock index.
+18. **Test count gate:** the 100% coverage gate passes vacuously with zero tests
+    (not a risk now that there are 300+ tests, but still true).
+19. **Shared library runtime:** the `.so` needs `libgnat-16.so` from the Alire
+    toolchain (found via RUNPATH). A production image must include it or set
+    `LD_LIBRARY_PATH`. The Dockerfile has **not** been updated to build the engine
+    (see Tooling below), so a container deploy won't work yet.
+20. **CI untested:** `.github/workflows/ci.yml` changes (Alire setup in the Rails
+    test jobs, `ledger_core` job) have never run on GitHub; verify the
+    `alire-project/setup-alire@v5` inputs on the first run.
+21. **Ledger rows must be chronological per user:** a row older than the user's
+    latest row raises `Ledger::Poster::OutOfOrder` (the running totals chain
+    depends on it). Writers read the clock inside the user lock.
+22. **Migrations:** `20261023000200` adds 40 cumulative totals columns and
+    `quantity_after`; `…0300` backfills by replaying through the engine. I edited
+    000200 after migrating the dev DB; a fresh `db:prepare` is fine, but any old
+    dev DB should be recreated.
+23. **`.rubocop.yml` now excludes `ledger_core/**`** (the Ruby differential test there
+    gave 591 offenses). Revert if you'd rather lint it.
+24. **Differential test** (`ledger_core/tests/differential/diff_test.rb`, ~122k
+    checks against pure-Ruby reference) runs in `script/test` and CI.
+25. **`next_price` semantics** keep the old Ruby behavior,
+    `price + trunc(price × bps / 10000)`, which differs from price × (10000+bps)/10000
+    for downward moves.
 
-## Ledger core (`ledger_core/`)
+## What exists
 
-- [ ] Ghost body for `Total`; prove `Is_Balanced`
-- [ ] `Post` procedure: precondition `Is_Balanced`, postcondition ledger totals still equal
-- [ ] Account balance state and proof that Σdebits = Σcredits across the ledger
-- [ ] Buy / Sell operations with fees/spread; reject insufficient cash or holdings
-- [ ] Lot tracking per purchase; realized gain on sale under both weighted
-      average and FIFO (prove lots sum to holdings and cost basis is conserved)
-- [ ] Per-tick revaluation operation posting unrealized gain/loss
-- [ ] Install GNATprove; get `gnatprove --level=2` clean in CI
-- [ ] AUnit/test-driver cases alongside the proofs
-- [ ] Export C-ABI for Ruby `ffi` (add `ffi` gem; build shared lib via `LIBRARY_TYPE=relocatable`)
+- [x] Rails 8.1 app with users, login/signup/logout, per-user cost basis setting
+- [x] `ledger_core` SPARK engine: validation, quotes, cost basis (weighted average
+      and FIFO), balance sheet, income statement, cash flow; all proved
+      (`gnatprove --level=4`, 1081 checks), 1293 unit checks, differential test, C ABI documented in
+      `ledger_core/ABI.md`
+- [x] Ruby ffi bridge (`LedgerEngine`), append-only ledger tables, services for
+      deposit / buy / sell / revalue, per-tick revaluation hook, $1,776 signup grant
+- [x] Mock price index, 15 calibers, Solid Queue tick job, rollups, history ranges
+- [x] Dashboard (portfolio, trading, net worth chart with 1D/1W/1M/YTD/1Y/MAX)
+- [x] Balance sheet, income statement, statement of cash flows with period picker
+- [x] Mandatory gates: rubocop, brakeman, bundler-audit, importmap audit, 100%
+      line+branch coverage, GNATprove, Ada unit tests; `script/{build,run,test}`
+- [x] `script/test` passes end to end locally (Rails 394 tests, Ada 1293 checks,
+      1081 proofs)
 
-## Financial statements (per user, on demand)
+## Next
 
-Requirements; the ledger computes them, Rails only renders.
+### Product
+- [ ] Email verification and password reset (needs mail setup)
+- [ ] Real market-data feed behind the `PriceIndex` interface
 
-- [ ] Decide chart of accounts: Cash, Holdings (per caliber), Owner's Capital,
-      Retained Earnings, Realized Gain/Loss, Unrealized Gain/Loss
-- [ ] Ledger supports as-of queries (balances at time T) and period queries (T1..T2)
-- [ ] Balance sheet as of T: Assets = Liabilities + Equity (prove in SPARK)
-- [ ] Income statement for T1..T2: realized + unrealized gains/losses, net income
-- [ ] Statement of cash flows for T1..T2: operating (trades), financing (initial
-      funding), opening/closing cash; reconcile to balance sheet cash
-- [ ] Cross-statement checks: net income = Δ retained earnings; cash flow closing
-      cash = balance sheet cash
-- [ ] Rails: statement pages with date / period picker, scoped to the current user
-- [ ] Rails: invalid periods (end before start, future dates) are rejected
-- [ ] Tests with hand-computed fixtures for each statement
+### Ledger core
+- [ ] Make the C export shim provably thin (or SPARK) and test ghost code directly (item 9)
+- [ ] Ada coverage gate (GNATcov) to enforce "every subprogram tested"
 
-## Price index
-
-- [ ] Interface: `current_prices` → `[{caliber, price_cents, as_of}]`
-- [ ] Mock implementation: seeded random walk, bounded per tick, price ≥ 1 cent
-- [ ] Price history table so portfolio history can be recomputed
-- [ ] Tests for determinism and bounds
-
-## Rails app
-
-- [ ] Enable `bcrypt`; user model with `has_secure_password`; sessions/login/signup
-- [ ] Signup grants $1,776.00 (177_600 cents) via a ledger deposit transaction
-- [ ] `Caliber` model + seeds (15+ calibers)
-- [ ] Solid Queue recurring job to tick prices (config/recurring.yml)
-- [ ] Holdings and trades (buy/sell) through the ledger
-- [ ] Portfolio snapshots (timestamp, cash, holdings value, net worth)
-- [ ] Portfolio history page (chart of net worth over time) with range buttons:
-      1D, 1W, 1M, YTD, 1Y, MAX (MAX = from account creation, indefinitely)
-- [ ] Per-user cost basis setting (weighted average / FIFO), persisted on the
-      user, switchable at runtime; applies to portfolio and statements
-- [ ] Price history rollups so MAX charts stay fast over very long histories
-- [ ] Tests: each range boundary (incl. YTD at year start, leap days), both cost basis methods
-- [ ] Authorization: users can see only their own portfolio
-- [ ] Money formatting helper (cents → `$1,234.56`); no floats
-- [ ] Replace default `root` route and the placeholder README stubs
-
-## Tooling / ops
-
-- [x] Mandatory brakeman (CI, `bin/ci`, `script/test`), STANDARDS.md, `script/{build,run,test}`
-- [x] Ruby coverage gate (SimpleCov, 100% line+branch when `COVERAGE=1`)
-- [x] CI job for `ledger_core` (build + GNATprove)
+### Tooling / ops
 - [ ] GitHub: protect `main`, require all CI jobs (manual setting)
-- [ ] Install GNATprove locally (`script/test` fails without it, on purpose)
-- [ ] Ada unit test harness (`ledger_core/tests/`, AUnit) and an Ada coverage
-      gate (GNATcov) to enforce "every subprogram tested"
-- [ ] Verify the CI action `alire-project/setup-alire` version/inputs on first run
-- [ ] Add `bin/rails db:migrate` first migration; `db:prepare` needs a schema
-- [ ] Dockerfile: build `ledger_core` into the image
+- [ ] Dockerfile: install Alire/GNAT, build the relocatable `ledger_core` library
+      into the image, ship `libgnat`, set `LEDGER_CORE_LIB`
 - [ ] Update Kamal config for the real app name and host
+- [ ] Run CI on GitHub and fix any setup-alire issues (item 20)
+- [ ] Mention `LEDGER_CORE_LIB` and the `.so` build in deployment docs

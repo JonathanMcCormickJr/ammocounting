@@ -24,6 +24,22 @@
   </head>
 
   <body>
-    <%= yield %>
+    <header class="site">
+      <strong>Ammocounting</strong>
+      <% if authenticated? %>
+        <nav aria-label="Main">
+          <%= link_to "Dashboard", root_path %>
+          <%= link_to "Market", calibers_path %>
+          <%= link_to "Statements", balance_sheet_statements_path %>
+          <%= link_to "Settings", settings_path %>
+          <%= button_to "Sign out", session_path, method: :delete, class: "link" %>
+        </nav>
+      <% end %>
+    </header>
+    <main>
+      <%= tag.p(flash[:alert], class: "flash alert") if flash[:alert] %>
+      <%= tag.p(flash[:notice], class: "flash notice") if flash[:notice] %>
+      <%= yield %>
+    </main>
   </body>
 </html>

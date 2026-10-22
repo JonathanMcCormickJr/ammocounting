@@ -1,0 +1,53 @@
+require "test_helper"
+
+class TickRunnerTest < ActiveSupport::TestCase
+  NOW = Time.utc(2026, 5, 1, 12, 7)
+
+  teardown { TickRunner.after_tick.clear }
+
+  test "stores one tick per caliber" do
+    assert_difference "PriceTick.count", 2 do
+      ticks = TickRunner.call(now: NOW)
+      assert_equal 2, ticks.size
+    end
+    assert_equal Time.utc(2026, 5, 1, 12, 5), calibers(:nine_mm).latest_tick.as_of
+  end
+
+  test "is idempotent for the same tick time" do
+    TickRunner.call(now: NOW)
+    assert_no_difference "PriceTick.count" do
+      assert_empty TickRunner.call(now: NOW)
+    end
+  end
+
+  test "is atomic when the index fails" do
+    broken = Object.new
+    def broken.current_prices(now:)
+      [ { caliber_id: Caliber.first.id, as_of: now, price_centicents: 5 },
+        { caliber_id: Caliber.last.id, as_of: now, price_centicents: 0 } ]
+    end
+    assert_no_difference "PriceTick.count" do
+      assert_raises(ActiveRecord::RecordInvalid) { TickRunner.call(now: NOW, index: broken) }
+    end
+  end
+
+  test "the ledger revaluation hook is registered at boot" do
+    # other tests clear the list in teardown; the registration itself is idempotent
+    Ledger.register_tick_hook
+    assert_includes TickRunner.after_tick, Ledger::TICK_HOOK
+  end
+
+  test "after_tick callables receive the stored ticks" do
+    received = []
+    TickRunner.after_tick << ->(ticks) { received << ticks.size }
+    TickRunner.call(now: NOW)
+    assert_equal [ 2 ], received
+  end
+
+  test "defaults now to current time" do
+    travel_to NOW do
+      TickRunner.call
+    end
+    assert_equal Time.utc(2026, 5, 1, 12, 5), PriceTick.maximum(:as_of)
+  end
+end

@@ -9,9 +9,15 @@ default: &default
   max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
   timeout: 5000
 
+# Development uses a separate queue database so Solid Queue runs like production.
 development:
-  <<: *default
-  database: storage/development.sqlite3
+  primary:
+    <<: *default
+    database: storage/development.sqlite3
+  queue:
+    <<: *default
+    database: storage/development_queue.sqlite3
+    migrations_paths: db/queue_migrate
 
 # Warning: The database defined as "test" will be erased and
 # re-generated from your development database when you run "rake".

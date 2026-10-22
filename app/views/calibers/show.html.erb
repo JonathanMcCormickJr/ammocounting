@@ -1,0 +1,10 @@
+<% content_for :title, @caliber.name %>
+<h1><%= @caliber.name %></h1>
+<nav class="ranges" aria-label="Chart range">
+  <% ChartRange.all.each do |range| %>
+    <%= link_to range.key, caliber_path(@caliber, range: range.key),
+          class: ("active" if range.key == @range.key), "aria-current": (@range.key == range.key ? "page" : nil) %>
+  <% end %>
+</nav>
+<%= price_chart(@points) %>
+<p><%= link_to "Back to market", calibers_path %></p>

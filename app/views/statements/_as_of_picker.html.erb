@@ -1,0 +1,6 @@
+<%= form_with url: balance_sheet_statements_path, method: :get, class: "picker" do |form| %>
+  <p><%= form.label :as_of, "As of date (UTC, end of day; blank = now)" %>
+  <%= form.date_field :as_of, value: params[:as_of].presence.then { _1 if _1.is_a?(String) } %></p>
+  <%= form.submit "Show", name: nil %>
+<% end %>
+<p class="hint">All times are UTC.</p>

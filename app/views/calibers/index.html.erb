@@ -1,0 +1,13 @@
+<% content_for :title, "Market" %>
+<h1>Market</h1>
+<table>
+  <thead><tr><th>Caliber</th><th class="num">Price / round</th></tr></thead>
+  <tbody>
+    <% @calibers.each do |caliber| %>
+      <tr>
+        <td><%= link_to caliber.name, caliber_path(caliber) %></td>
+        <td class="num"><%= format_centicents(@latest.fetch(caliber.id).price_centicents) %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

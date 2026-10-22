@@ -6,11 +6,19 @@ These are mandatory. CI enforces them; a red check blocks merge.
 
 | Script        | Purpose                                                        |
 |---------------|----------------------------------------------------------------|
-| `script/build`| Install gems and build `ledger_core` (`alr build`)             |
+| `script/build`| Install gems; build `ledger_core` (static, and the `.so` Rails loads via ffi; override path with `LEDGER_CORE_LIB`) |
 | `script/run`  | Build, prepare the DB, start the Rails server                  |
 | `script/test` | Run **every** mandatory check below; CI runs the same checks   |
 
 If `script/test` passes locally, CI should pass.
+
+## Command output (agents)
+
+Humans and AI agents working in this repo run shell commands with the `rtk `
+prefix (e.g. `rtk bin/rails test`, `rtk alr build`) to condense output and save
+tokens. If a condensed result is unusable (empty when output was clearly
+expected, contradicting the exit code, or garbled), re-run it as `rtk proxy <cmd>`.
+The scripts in `script/` and CI run commands directly, without `rtk`.
 
 ## Mandatory checks
 
@@ -26,7 +34,7 @@ If `script/test` passes locally, CI should pass.
 **ledger_core (SPARK Ada)**
 
 1. `alr build` with no warnings.
-2. `gnatprove --level=2` with no unproved checks and no unjustified `pragma
+2. `gnatprove --level=4` with no unproved checks and no unjustified `pragma
    Annotate`/`Assume`. Proof failures fail the build.
 3. Unit tests for every subprogram (see below).
 
@@ -41,6 +49,15 @@ If `script/test` passes locally, CI should pass.
 - A bug fix starts with a failing test that reproduces it.
 
 ## Correctness rules
+
+- **All math is in the SPARK engine.** Rails does no arithmetic on money, prices
+  or quantities (no SQL SUM either); it stores integers and calls the engine. The
+  ratchet test `test/architecture/no_money_math_test.rb` fails on new arithmetic in
+  `app/`. Exceptions (calendar/time math, engine bindings) need a justified entry
+  in `test/architecture/math_allowlist.yml`.
+- Every engine function is cross-checked against an independent pure-Ruby
+  reference by `ledger_core/tests/differential/diff_test.rb`.
+- Do not build in `ledger_core/obj` while GNATprove runs.
 
 - Money is integer cents. No `Float`, no `BigDecimal` rounding, no Ruby-side
   money arithmetic; the ledger does it.

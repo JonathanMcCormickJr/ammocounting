@@ -1,0 +1,5 @@
+<% content_for :title, "Settings" %>
+<h1>Settings</h1>
+<p>The cost basis method decides how the cost of rounds sold is worked out. It changes realized versus unrealized gain
+  in your positions and statements; your net worth and net income stay the same.</p>
+<%= render "settings/cost_basis_form", user: @user %>

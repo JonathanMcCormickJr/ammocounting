@@ -1,0 +1,11 @@
+nine_mm:
+  name: 9mm
+  slug: 9mm
+  position: 0
+  starting_price_centicents: 2500
+
+twenty_two:
+  name: .22 LR
+  slug: 22-lr
+  position: 1
+  starting_price_centicents: 1000

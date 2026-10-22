@@ -1,0 +1,64 @@
+# Lines the money-math scanner (money_math_scanner.rb) must not flag. Each entry covers every
+# line of `file` containing `match` and needs a written `reason`. Only calendar/time
+# arithmetic, array/string building and engine bindings belong here: never money,
+# prices, quantities or pixel coordinates. Stale entries fail the test.
+- file: app/lib/ledger_engine.rb
+  match: Native.sum(
+  reason: The binding of the engine's own `sum` export (the arithmetic bridge itself), not Ruby arithmetic.
+- file: app/models/price_tick.rb
+  match: MAX(as_of)
+  reason: SQL MAX over tick TIMES (latest tick per caliber), not over prices or money.
+- file: app/models/price_tick.rb
+  match: interval_minutes * 60
+  reason: 'Tick interval alignment: converts a configured number of minutes to seconds (time bucketing, not money).'
+- file: app/models/price_tick.rb
+  match: .div(step) * step
+  reason: Floors an epoch time to the tick interval (time bucketing, not money).
+- file: app/models/user.rb
+  match: .compact.min.utc.floor
+  reason: Earliest of two TIMESTAMPS, floored to whole seconds (calendar/time clamp).
+- file: app/services/chart_range.rb
+  match: now - 1.
+  reason: Calendar offset back from now (Time minus Duration), as in 1.month.ago.
+- file: app/services/ledger.rb
+  match: Time.current.floor
+  reason: Current time to whole seconds (the ledger timestamp resolution); time, not money.
+- file: app/services/net_worth_history.rb
+  match: now.utc.floor
+  reason: Current time to whole seconds (time, not money).
+- file: app/services/net_worth_history.rb
+  match: .utc.floor, origin ].max
+  reason: Clamps the chart window start between account start and now (TIME clamp); the sample times and all values come from the engine.
+- file: app/services/price_history.rb
+  match: .minimum(:as_of)
+  reason: SQL MIN over tick TIMES (earliest tick), not money.
+- file: app/services/price_history.rb
+  match: (start - PriceRollup::SPANS
+  reason: 'Calendar offset: widens the bucket window by one bucket span (Time minus Duration).'
+- file: app/services/price_rollup.rb
+  match: (now - RAW_WINDOW)
+  reason: 'Calendar offset: raw tick retention cutoff (Time minus Duration).'
+- file: app/services/price_rollup.rb
+  match: .maximum(:bucket_start)
+  reason: SQL MAX over bucket start TIMES (resume point), not prices.
+- file: app/services/statements/period.rb
+  match: now.utc.floor
+  reason: Current time to whole seconds (time, not money).
+- file: app/services/statements/period.rb
+  match: origin.utc.floor
+  reason: Account start to whole seconds; the -1 makes the lower bound exclusive by one SECOND (calendar/time).
+- file: app/services/statements/period.rb
+  match: '[ end_of(date), now ].min'
+  reason: Clamps an end-of-day TIME to now (calendar/time clamp).
+- file: app/services/statements/period.rb
+  match: now - 1.
+  reason: Calendar offset back from now (Time minus Duration), as in 1.month.ago.
+- file: app/services/statements/period.rb
+  match: beginning_of_year - 1
+  reason: Start of the calendar year minus one SECOND (exclusive lower bound; calendar/time).
+- file: app/services/statements/period.rb
+  match: Time.utc(_1.year, _1.month, _1.day) - 1
+  reason: Midnight of a calendar date minus one SECOND (exclusive lower bound; calendar/time).
+- file: config/initializers/filter_parameter_logging.rb
+  match: filter_parameters +=
+  reason: 'Rails configuration: appends names to an Array of parameter names; no numbers involved.'

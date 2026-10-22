@@ -1,0 +1,5 @@
+<nav class="subnav" aria-label="Statements">
+  <%= link_to "Balance sheet", balance_sheet_statements_path, "aria-current": (action_name == "balance_sheet" ? "page" : nil) %>
+  <%= link_to "Income statement", income_statement_statements_path, "aria-current": (action_name == "income_statement" ? "page" : nil) %>
+  <%= link_to "Cash flows", cash_flow_statements_path, "aria-current": (action_name == "cash_flow" ? "page" : nil) %>
+</nav>

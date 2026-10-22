@@ -1,0 +1,6 @@
+--  Contracts, loop invariants, assertions and ghost code are proved by
+--  GNATprove (see script/test). Several are quantified over a whole array or
+--  are recursive sums, so evaluating them at run time would make linear
+--  algorithms quadratic or worse. Every run-time check (overflow, range,
+--  index, division) stays enabled: nothing is suppressed.
+pragma Assertion_Policy (Ignore);

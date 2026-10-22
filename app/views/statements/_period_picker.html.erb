@@ -1,0 +1,14 @@
+<% active = local_assigns[:active] %>
+<nav class="ranges" aria-label="Period presets">
+  <% Statements::Period::PRESETS.each do |key, label| %>
+    <%= link_to label, url_for(period: key), class: ("active" if key == active), "aria-current": (key == active ? "page" : nil) %>
+  <% end %>
+</nav>
+<%= form_with url: url_for, method: :get, class: "picker" do |form| %>
+  <p><%= form.label :from, "From date (UTC)" %>
+  <%= form.date_field :from, value: params[:from].presence.then { _1 if _1.is_a?(String) } %></p>
+  <p><%= form.label :to, "To date (UTC)" %>
+  <%= form.date_field :to, value: params[:to].presence.then { _1 if _1.is_a?(String) } %></p>
+  <%= form.submit "Show custom period", name: nil %>
+<% end %>
+<p class="hint">All times are UTC. Custom dates include both whole days. Presets run back from now.</p>

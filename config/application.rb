@@ -16,6 +16,17 @@ module Ammocounting
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
 
+    # Price tick cadence. config/recurring.yml must schedule PriceTickJob at the same interval.
+    config.x.tick_interval_minutes = 5
+    # Which PriceIndex implementation supplies prices (:mock is the only one so far).
+    config.x.price_index = :mock
+    # Seed for the deterministic mock random walk.
+    config.x.price_index_seed = 1776
+
+    # Trading costs, in basis points of trade value (100 bps = 1%). Spread is rounded up, fee half-up, by the engine.
+    config.x.spread_bps = 50
+    config.x.fee_bps = 100
+
     # Configuration for the application, engines, and railties goes here.
     #
     # These settings can be overridden in specific environments using the files

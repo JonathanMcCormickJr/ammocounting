@@ -6,3 +6,13 @@ inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
 # Layout/SpaceInsideArrayLiteralBrackets:
 #   Enabled: false
+
+# ledger_core is the separately proven Ada engine; its Ruby differential test
+# is a standalone script with its own style.
+inherit_mode:
+  merge:
+    - Exclude
+
+AllCops:
+  Exclude:
+    - "ledger_core/**/*"

@@ -1,47 +1,65 @@
+with Interfaces;
+
 --  Root of the double-entry accounting engine.
 --
---  All amounts are integer minor units (USD cents); there is no floating
---  point anywhere in this crate. The central invariant -- debits equal
---  credits -- is expressed in Is_Balanced and must be proved by GNATprove for
---  every operation that posts a transaction.
+--  All amounts are integers (cents, centicents, basis points, rounds, Unix
+--  seconds); there is no floating point anywhere in this crate. See
+--  DESIGN.md for the contract and ABI.md for the C ABI.
 package Ledger_Core with SPARK_Mode, Pure is
 
-   --  Bounds are far above any realistic balance, and small enough that
-   --  summing Max_Postings amounts can never overflow Cents.
-   Max_Amount : constant := 10**12;
+   type Int32 is new Interfaces.Integer_32;
+   type Int64 is new Interfaces.Integer_64;
 
-   type Cents is range -Max_Amount .. Max_Amount;
-   type Positive_Cents is range 1 .. Max_Amount;
+   --  128-bit type used for intermediate products; never exposed.
+   subtype Big is Long_Long_Long_Integer;
 
-   type Side is (Debit, Credit);
+   --  Input bounds. Anything outside these is rejected with Out_Of_Range.
+   Max_Amount    : constant := 10**12;  --  one posting or trade, in cents
+   Max_Quantity  : constant := 10**9;   --  rounds in one trade
+   Max_Price     : constant := 10**7;   --  centicents per round
+   Max_Bps       : constant := 10_000;  --  100 %
+   Max_Aggregate : constant := 10**17;  --  cumulative account totals
+   Max_Gain      : constant := 10**18;  --  externally supplied realized gain
+   Max_Held      : constant := Max_Quantity;  --  rounds of one caliber held
+   Max_Time      : constant := 10**12;  --  Unix seconds, chart sampling
+   Max_Size      : constant := 10**9;   --  chart pixels
+   Max_Points    : constant := 10**6;   --  chart sample points
 
    Max_Postings : constant := 16;
-   subtype Posting_Count is Natural range 0 .. Max_Postings;
-   subtype Posting_Index is Positive range 1 .. Max_Postings;
 
-   type Account_Id is range 1 .. 2**31 - 1;
+   --  Trade side codes (Trade_Buy: units come in, Trade_Sell: units go out).
+   Trade_Buy  : constant Int32 := 0;
+   Trade_Sell : constant Int32 := 1;
 
-   type Posting is record
-      Account : Account_Id := 1;
-      Kind    : Side := Debit;
-      Amount  : Positive_Cents := 1;
-   end record;
+   --  Every engine entry point reports one of these; the representation
+   --  values are the codes of the C ABI.
+   type Status is
+     (Ok,
+      Bad_Argument,
+      Out_Of_Range,
+      Unbalanced,
+      Insufficient_Cash,
+      Insufficient_Holdings,
+      Negative_Proceeds,
+      Bad_Order,
+      Negative_Balance,
+      Not_Reconciled,
+      Internal_Error);
 
-   type Posting_Array is array (Posting_Index) of Posting;
+   for Status use
+     (Ok                    => 0,
+      Bad_Argument          => 1,
+      Out_Of_Range          => 2,
+      Unbalanced            => 3,
+      Insufficient_Cash     => 4,
+      Insufficient_Holdings => 5,
+      Negative_Proceeds     => 6,
+      Bad_Order             => 7,
+      Negative_Balance      => 8,
+      Not_Reconciled        => 9,
+      Internal_Error        => 10);
 
-   type Transaction is record
-      Count    : Posting_Count := 0;
-      Postings : Posting_Array;
-   end record;
-
-   --  Sum of the amounts on one side of a transaction. Specification only;
-   --  the body is a TODO (see TODO.md, "Ledger core").
-   function Total (T : Transaction; Kind : Side) return Long_Long_Integer
-   with Ghost, Import;
-
-   --  A transaction may only be posted if debits equal credits.
-   function Is_Balanced (T : Transaction) return Boolean is
-     (Total (T, Debit) = Total (T, Credit))
-   with Ghost;
+   --  Version as major * 10000 + minor * 100 + patch.
+   function Engine_Version return Int32 is (200);
 
 end Ledger_Core;

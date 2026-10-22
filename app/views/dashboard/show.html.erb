@@ -1,0 +1,64 @@
+<% content_for :title, "Portfolio" %>
+<h1>Portfolio</h1>
+
+<dl class="summary">
+  <dt>Cash</dt><dd id="cash" class="num"><%= format_cents(@portfolio.cash) %></dd>
+  <dt>Holdings (carrying value)</dt><dd id="holdings-value" class="num"><%= format_cents(@portfolio.holdings_value) %></dd>
+  <dt>Net worth</dt><dd id="net-worth" class="num"><%= format_cents(@portfolio.net_worth) %></dd>
+</dl>
+
+<h2>Net worth history</h2>
+<nav class="ranges" aria-label="Net worth range">
+  <% ChartRange.all.each do |range| %>
+    <%= link_to range.key, root_path(range: range.key),
+          class: ("active" if range.key == @range.key), "aria-current": (@range.key == range.key ? "page" : nil) %>
+  <% end %>
+</nav>
+<%= net_worth_chart(@history) %>
+
+<h2>Holdings</h2>
+<p id="cost-basis-method">Cost basis method: <strong><%= cost_basis_label(@user.cost_basis_method) %></strong>
+  (<%= link_to "settings", settings_path %>)</p>
+<%= render "settings/cost_basis_form", user: @user %>
+<% if @portfolio.positions.empty? %>
+  <p class="placeholder">You do not hold any rounds yet.</p>
+<% else %>
+  <div class="table-wrap"><table id="holdings">
+    <thead><tr><th>Caliber</th><th class="num">Rounds</th><th class="num">Price</th><th class="num">Market value</th><th class="num">Cost basis</th><th class="num">Unrealized gain</th></tr></thead>
+    <tbody>
+      <% @portfolio.positions.each do |position| %>
+        <tr>
+          <td><%= position.caliber.name %></td>
+          <td class="num"><%= number_with_delimiter(position.quantity) %></td>
+          <td class="num"><%= format_centicents(position.price_centicents) %></td>
+          <td class="num"><%= format_cents(position.market_value) %></td>
+          <td class="num"><%= format_cents(position.cost_basis) %></td>
+          <td class="num"><%= format_cents(position.unrealized_gain) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table></div>
+<% end %>
+
+<h2>Trade</h2>
+<div class="table-wrap"><table id="market">
+  <thead><tr><th>Caliber</th><th class="num">Price</th><th class="num">Held</th><th>Order</th></tr></thead>
+  <tbody>
+    <% @calibers.each do |caliber| %>
+      <% position = @portfolio.position_for(caliber) %>
+      <tr>
+        <td><%= link_to caliber.name, caliber_path(caliber) %></td>
+        <td class="num"><%= format_centicents(@prices.fetch(caliber.id)) %></td>
+        <td class="num"><%= number_with_delimiter(position&.quantity || 0) %></td>
+        <td>
+          <%= form_with scope: :trade, url: trades_path do |form| %>
+            <%= form.hidden_field :caliber_slug, value: caliber.slug, id: nil %>
+            <%= form.number_field :quantity, min: 1, step: 1, required: true, "aria-label": "Rounds of #{caliber.name}", id: nil %>
+            <%= form.button "Buy", name: "trade[side]", value: "buy", id: nil %>
+            <%= form.button "Sell", name: "trade[side]", value: "sell", id: nil %>
+          <% end %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table></div>

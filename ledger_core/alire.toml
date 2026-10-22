@@ -8,3 +8,6 @@ maintainers-logins = ["JonathanMcCormickJr"]
 licenses = "GPL-3.0-or-later"
 website = ""
 tags = ["ammo", "ammunition", "accounting"]
+
+[[depends-on]]
+gnatprove = "^16.1.0"

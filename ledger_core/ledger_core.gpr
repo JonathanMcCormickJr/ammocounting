@@ -14,7 +14,32 @@ project Ledger_Core is
      external ("LEDGER_CORE_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
    for Library_Kind use Library_Type;
 
+   --  The shared library is stand-alone: it carries its own Ada runtime
+   --  elaboration (run automatically when the library is loaded), so a C or
+   --  Ruby host needs no init call. Only the C API is exported to C.
+   for Library_Interface use
+     ("Ledger_Core",
+      "Ledger_Core.Arithmetic",
+      "Ledger_Core.Wire",
+      "Ledger_Core.Transactions",
+      "Ledger_Core.Quotes",
+      "Ledger_Core.Holdings",
+      "Ledger_Core.Builders",
+      "Ledger_Core.Running",
+      "Ledger_Core.Cost_Basis",
+      "Ledger_Core.Reports",
+      "Ledger_Core.Display",
+      "Ledger_Core.Prices",
+      "Ledger_Core.C_API");
+   case Library_Type is
+      when "relocatable" =>
+         for Library_Standalone use "standard";
+      when others =>
+         null;
+   end case;
+
    package Compiler is
+      for Local_Configuration_Pragmas use "ledger_core.adc";
       for Default_Switches ("Ada") use Ledger_Core_Config.Ada_Compiler_Switches;
    end Compiler;
 

@@ -10,8 +10,9 @@ over time (simulated), and those fluctuations determine whether a user's net
 worth goes up or down. The UI shows each logged-in user their historical
 portfolio value.
 
-> **Status: scaffolding.** The docs and project layout exist; most behavior does
-> not. See [TODO.md](TODO.md) for what is still needed.
+> **Status: working first version.** Accounts, trading, the SPARK ledger,
+> statements and history charts are implemented. See [TODO.md](TODO.md) for
+> assumptions awaiting review and what is still needed (notably deployment).
 
 ## Design principles
 
@@ -20,7 +21,8 @@ threatens correctness, drop the feature.
 
 - Money is stored as **integer cents**. No floating point for money anywhere.
 - Prices are **integer cents per round**. Quantities are whole rounds.
-- Rails never does money arithmetic itself; it asks the ledger.
+- Rails never does arithmetic on money, prices or quantities; the SPARK engine
+  does all of it (proved at GNATprove level 4). Rails stores and retrieves integers.
 
 ## Architecture
 
@@ -57,7 +59,9 @@ Built with [Alire](https://alire.ada.dev/):
 ```sh
 cd ledger_core
 alr build            # compile
-alr exec -- gnatprove -P ledger_core.gpr   # prove (once GNATprove is installed)
+alr exec -- gnatprove -P ledger_core.gpr --level=2   # prove (GNATprove comes via Alire)
+(cd tests && alr build && ./bin/tests)                # unit tests
+LEDGER_CORE_LIBRARY_TYPE=relocatable alr build        # shared lib for Rails (script/build does this)
 ```
 
 Rails calls the engine in-process through a C-ABI shared library using Ruby

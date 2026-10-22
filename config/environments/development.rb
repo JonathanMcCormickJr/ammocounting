@@ -29,6 +29,10 @@ Rails.application.configure do
   config.cache_store = :memory_store
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
+  # Run jobs (price ticks) through Solid Queue, hosted inside Puma (see config/puma.rb).
+  config.active_job.queue_adapter = :solid_queue
+  config.solid_queue.connects_to = { database: { writing: :queue } }
+
   config.active_storage.service = :local
 
   # Don't care if the mailer can't send.

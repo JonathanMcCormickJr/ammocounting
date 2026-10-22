@@ -1,0 +1,14 @@
+nine_mm_first:
+  caliber: nine_mm
+  price_centicents: 2500
+  as_of: 2026-01-01 00:00:00
+
+nine_mm_latest:
+  caliber: nine_mm
+  price_centicents: 2550
+  as_of: 2026-01-01 00:05:00
+
+twenty_two_first:
+  caliber: twenty_two
+  price_centicents: 1000
+  as_of: 2026-01-01 00:00:00

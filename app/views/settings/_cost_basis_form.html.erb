@@ -1,0 +1,5 @@
+<%= form_with model: user, url: settings_path, method: :patch, class: "inline-form" do |form| %>
+  <%= form.label :cost_basis_method, "Cost basis method" %>
+  <%= form.select :cost_basis_method, [ [ "Weighted average", "weighted_average" ], [ "FIFO", "fifo" ] ], selected: user.cost_basis_method %>
+  <%= form.submit "Save" %>
+<% end %>

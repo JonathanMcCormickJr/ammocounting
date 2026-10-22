@@ -1,0 +1,16 @@
+<% content_for :title, "Cash flows" %>
+<h1>Statement of cash flows</h1>
+<%= render "statements/nav" %>
+<%= render "statements/period_header", report: @report %>
+
+<table id="cash-flow">
+  <caption class="visually-hidden">Statement of cash flows</caption>
+  <tbody>
+    <tr><td>Operating: trading costs</td><td class="num" id="cf-operating"><%= format_cents(@report.cash_flow.operating) %></td></tr>
+    <tr><td>Investing: ammo bought and sold (at value)</td><td class="num" id="cf-investing"><%= format_cents(@report.cash_flow.investing) %></td></tr>
+    <tr><td>Financing: owner contributions</td><td class="num" id="cf-financing"><%= format_cents(@report.cash_flow.financing) %></td></tr>
+    <tr class="total"><td>Net change in cash</td><td class="num" id="cf-net"><%= format_cents(@report.cash_flow.net_change) %></td></tr>
+    <tr><td>Opening cash</td><td class="num" id="cf-opening"><%= format_cents(@report.opening.cash) %></td></tr>
+    <tr class="total"><td>Closing cash</td><td class="num" id="cf-closing"><%= format_cents(@report.closing.cash) %></td></tr>
+  </tbody>
+</table>

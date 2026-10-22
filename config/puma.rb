@@ -35,7 +35,10 @@ port ENV.fetch("PORT", 3000)
 plugin :tmp_restart
 
 # Run the Solid Queue supervisor inside of Puma for single-server deployments.
-plugin :solid_queue if ENV["SOLID_QUEUE_IN_PUMA"]
+# Enabled by default in development so recurring price ticks run with `bin/rails server`;
+# opt out there with SOLID_QUEUE_IN_PUMA="".
+solid_queue_in_puma = ENV.fetch("SOLID_QUEUE_IN_PUMA") { ENV.fetch("RAILS_ENV", "development") == "development" ? "1" : "" }
+plugin :solid_queue if solid_queue_in_puma.present?
 
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
 # In other environments, only set the PID file if requested.

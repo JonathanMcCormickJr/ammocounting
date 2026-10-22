@@ -1,0 +1,16 @@
+name = "ledger_core_tests"
+description = "Unit tests for the ledger_core SPARK engine."
+version = "0.1.0-dev"
+
+authors = ["Jonathan A. McCormick Jr."]
+maintainers = ["Jonathan A. McCormick Jr. <67705789+JonathanMcCormickJr@users.noreply.github.com>"]
+maintainers-logins = ["JonathanMcCormickJr"]
+licenses = "GPL-3.0-or-later"
+
+executables = ["tests"]
+
+[[depends-on]]
+ledger_core = "*"
+
+[[pins]]
+ledger_core = { path = ".." }

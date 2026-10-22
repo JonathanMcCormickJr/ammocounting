@@ -8,3 +8,45 @@
  *
  * Consider organizing styles into separate files for maintainability.
  */
+
+body { font-family: system-ui, sans-serif; margin: 0; color: #1b1f23; background: #fafafa; }
+header.site { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; align-items: center; padding: .75rem 1.5rem; background: #1f2d3d; color: #fff; }
+header.site nav { display: flex; gap: 1rem; align-items: center; }
+header.site a, header.site button.link { color: #fff; background: none; border: 0; font: inherit; cursor: pointer; text-decoration: underline; padding: 0; }
+header.site form { margin: 0; }
+main { max-width: 56rem; margin: 1.5rem auto; padding: 0 1rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .5rem; border-bottom: 1px solid #ddd; text-align: left; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.flash.alert, .errors { color: #a40000; }
+.flash.notice { color: #1b6b2a; }
+label { display: block; margin-bottom: .25rem; }
+.ranges { display: flex; gap: .5rem; margin: 1rem 0; }
+.ranges a { padding: .25rem .75rem; border: 1px solid #1f2d3d; border-radius: 4px; text-decoration: none; color: #1f2d3d; }
+.ranges a.active { background: #1f2d3d; color: #fff; }
+.chart { margin: 0; color: #1f5fbf; }
+.chart svg { width: 100%; height: auto; background: #fff; border: 1px solid #ddd; }
+.chart figcaption { color: #555; font-size: .875rem; }
+dl.summary { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+dl.summary dd { margin: 0; }
+td form { display: flex; gap: .25rem; margin: 0; }
+td form input[type=number] { width: 6rem; }
+.table-wrap { overflow-x: auto; }
+tr.total td { font-weight: 600; border-top: 2px solid #1f2d3d; }
+tbody th[scope=colgroup] { padding-top: 1rem; background: #eef1f4; }
+.subnav { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0 0 1rem; }
+.subnav a[aria-current=page] { font-weight: 700; text-decoration: none; color: #1b1f23; }
+.ranges { flex-wrap: wrap; }
+.picker { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; }
+.picker p { margin: 0; }
+.inline-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0; }
+.inline-form label { margin: 0; }
+.hint { color: #555; font-size: .875rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #1f5fbf; outline-offset: 2px; }
+@media (max-width: 40rem) {
+  main { margin: 1rem auto; }
+  th, td { padding: .35rem; }
+  dl.summary { grid-template-columns: 1fr; }
+  td form input[type=number] { width: 4.5rem; }
+}

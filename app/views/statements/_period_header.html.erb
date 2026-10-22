@@ -1,0 +1,7 @@
+<%= render "statements/period_picker", active: report.period.key %>
+<p>Period: <strong><%= report.period.label %></strong>, after
+  <time datetime="<%= report.period.from.iso8601 %>"><%= format_utc(report.period.from) %></time>
+  through <time datetime="<%= report.period.to.iso8601 %>"><%= format_utc(report.period.to) %></time>.</p>
+<% report.period.notes.each do |note| %>
+  <p class="flash notice"><%= note %></p>
+<% end %>

@@ -1,0 +1,21 @@
+<% content_for :title, "Balance sheet" %>
+<h1>Balance sheet</h1>
+<%= render "statements/nav" %>
+<%= render "statements/as_of_picker" %>
+<p>As of <time datetime="<%= @as_of.iso8601 %>"><%= format_utc(@as_of) %></time></p>
+
+<table id="balance-sheet">
+  <caption class="visually-hidden">Balance sheet</caption>
+  <tbody>
+    <tr><th colspan="2" scope="colgroup">Assets</th></tr>
+    <tr><td>Cash</td><td class="num" id="bs-cash"><%= format_cents(@sheet.cash) %></td></tr>
+    <tr><td>Holdings (at market)</td><td class="num" id="bs-holdings"><%= format_cents(@sheet.holdings) %></td></tr>
+    <tr class="total"><td>Total assets</td><td class="num" id="bs-assets"><%= format_cents(@sheet.total_assets) %></td></tr>
+    <tr><th colspan="2" scope="colgroup">Liabilities</th></tr>
+    <tr class="total"><td>Total liabilities</td><td class="num" id="bs-liabilities"><%= format_cents(@sheet.total_liabilities) %></td></tr>
+    <tr><th colspan="2" scope="colgroup">Equity</th></tr>
+    <tr><td>Owner's capital</td><td class="num" id="bs-capital"><%= format_cents(@sheet.owners_capital) %></td></tr>
+    <tr><td>Net income to date</td><td class="num" id="bs-income"><%= format_cents(@sheet.net_income_to_date) %></td></tr>
+    <tr class="total"><td>Total equity</td><td class="num" id="bs-equity"><%= format_cents(@sheet.total_equity) %></td></tr>
+  </tbody>
+</table>
