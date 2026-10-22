@@ -1,0 +1,10 @@
+name = "ledger_core"
+description = "A double-entry ammunition accounting engine written in SPARK."
+version = "0.1.0-dev"
+
+authors = ["Jonathan A. McCormick Jr."]
+maintainers = ["Jonathan A. McCormick Jr. <67705789+JonathanMcCormickJr@users.noreply.github.com>"]
+maintainers-logins = ["JonathanMcCormickJr"]
+licenses = "GPL-3.0-or-later"
+website = ""
+tags = ["ammo", "ammunition", "accounting"]
