@@ -120,4 +120,13 @@ class StatementsControllerTest < ActionDispatch::IntegrationTest
       assert_raises(Ledger::IntegrityError) { get balance_sheet_statements_path }
     end
   end
+
+  test "a ledger the trades disagree with is a loud error, never an income statement" do
+    sign_in_as(@user)
+    unreconciled = ->(*) { raise LedgerEngine::Error.new(:not_reconciled, :period_report_checked) }
+    with_singleton(LedgerEngine, :period_report_checked, unreconciled) do
+      assert_raises(Ledger::IntegrityError) { get income_statement_statements_path(period: "max") }
+      assert_raises(Ledger::IntegrityError) { get cash_flow_statements_path(period: "max") }
+    end
+  end
 end

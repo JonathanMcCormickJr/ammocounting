@@ -8,8 +8,8 @@ class TradesControllerTest < ActionDispatch::IntegrationTest
     fund(@other)
   end
 
-  def order(side, quantity, slug: "9mm", **extra)
-    post trades_path, params: { trade: { caliber_slug: slug, side: side, quantity: quantity }.merge(extra) }
+  def order(side, quantity, slug: "9mm", nonce: Ledger.new_nonce, **extra)
+    post trades_path, params: { trade: { caliber_slug: slug, side: side, quantity: quantity, nonce: nonce }.merge(extra) }
   end
 
   test "requires sign in" do
@@ -40,6 +40,46 @@ class TradesControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Not enough cash for this purchase.", flash[:alert]
     order("buy", "lots")
     assert_includes flash[:alert], "whole number of rounds"
+  end
+
+  test "submitting the same form twice executes once and shows a friendly notice" do
+    sign_in_as(@user)
+    nonce = Ledger.new_nonce
+    order("buy", 1000, nonce: nonce)
+    assert_equal "Buy: 1000 x 9mm at $0.255.", flash[:notice]
+    cash = Ledger::Balances.sheet(@user).cash
+    assert_no_difference [ "Trade.count", "LedgerTransaction.count" ] do
+      order("buy", 1000, nonce: nonce)
+    end
+    assert_redirected_to root_path
+    assert_equal "This order was already placed. Buy: 1000 x 9mm at $0.255.", flash[:notice]
+    assert_nil flash[:alert]
+    assert_equal cash, Ledger::Balances.sheet(@user).cash
+  end
+
+  test "a stale or forged nonce is refused politely" do
+    sign_in_as(@user)
+    order("buy", 1, nonce: "not-a-real-nonce")
+    assert_redirected_to root_path
+    assert_includes flash[:alert], "out of date"
+    assert_equal 0, Trade.count
+  end
+
+  test "a missing nonce is a bad request" do
+    sign_in_as(@user)
+    post trades_path, params: { trade: { caliber_slug: "9mm", side: "buy", quantity: 1 } }
+    assert_response :bad_request
+    assert_equal 0, Trade.count
+  end
+
+  test "another user's nonce does not block or reveal anything" do
+    sign_in_as(@other)
+    nonce = Ledger.new_nonce
+    Ledger::Buy.call(@user, calibers(:nine_mm), 1, nonce: nonce)
+    assert_difference "@other.trades.count", 1 do
+      order("buy", 1, nonce: nonce)
+    end
+    assert_equal "Buy: 1 x 9mm at $0.255.", flash[:notice]
   end
 
   test "an unknown side is refused" do

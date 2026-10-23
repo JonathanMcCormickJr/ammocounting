@@ -57,8 +57,11 @@ class LedgerModelsTest < ActiveSupport::TestCase
 
   test "Trade validations" do
     attrs = { user: @user, caliber: calibers(:nine_mm), ledger_transaction: @transaction, side: :buy, quantity: 1,
-              price_centicents: 1, value_cents: 0, spread_cents: 0, fee_cents: 0, occurred_at: Time.current }
+              price_centicents: 1, value_cents: 0, spread_cents: 0, fee_cents: 0, quantity_after: 1, occurred_at: Time.current }
     assert_predicate Trade.new(attrs), :valid?
+    assert_predicate Trade.new(attrs.merge(nonce: Ledger.new_nonce)), :valid?
+    assert_not_predicate Trade.new(attrs.merge(nonce: "short")), :valid?
+    assert_not_predicate Trade.new(attrs.merge(nonce: "G" * 32)), :valid?
     assert_not_predicate Trade.new(attrs.merge(quantity: 0)), :valid?
     assert_not_predicate Trade.new(attrs.merge(quantity: 10**9 + 1)), :valid?
     assert_not_predicate Trade.new(attrs.merge(price_centicents: 0)), :valid?
@@ -78,11 +81,12 @@ class LedgerModelsTest < ActiveSupport::TestCase
       LedgerPosting.insert_all([ { ledger_transaction_id: @transaction.id, account: 1, side: 0, amount_cents: 0, created_at: now, updated_at: now } ])
     end
     assert_raises(ActiveRecord::CheckViolation) do
-      LedgerTransaction.insert_all([ { user_id: @user.id, kind: 4, occurred_at: now, created_at: now, updated_at: now } ])
+      LedgerTransaction.insert_all([ { user_id: @user.id, kind: 4, occurred_at: now, created_at: now, updated_at: now }
+        .merge(LedgerTransaction.totals_attributes(LedgerEngine::ZERO_TOTALS)) ])
     end
     row = { user_id: @user.id, caliber_id: calibers(:nine_mm).id, side: 0, quantity: 1, price_centicents: 1, value_cents: 0,
-            spread_cents: 0, fee_cents: 0, ledger_transaction_id: @transaction.id, occurred_at: now, created_at: now, updated_at: now }
-    [ { side: 2 }, { quantity: 0 }, { quantity_after: -1 }, { quantity_after: 10**9 + 1 }, { price_centicents: 10**7 + 1 }, { value_cents: -1 }, { fee_cents: -1 } ].each do |bad|
+            spread_cents: 0, fee_cents: 0, quantity_after: 1, ledger_transaction_id: @transaction.id, occurred_at: now, created_at: now, updated_at: now }
+    [ { side: 2 }, { nonce: "short" }, { price_centicents: 0 }, { quantity: 0 }, { quantity_after: -1 }, { quantity_after: 10**9 + 1 }, { price_centicents: 10**7 + 1 }, { value_cents: -1 }, { fee_cents: -1 } ].each do |bad|
       assert_raises(ActiveRecord::CheckViolation, bad.to_s) { Trade.insert_all([ row.merge(bad) ]) }
     end
   end
@@ -120,7 +124,7 @@ class LedgerModelsTest < ActiveSupport::TestCase
     assert_equal %w[revalue_costs_debits revalue_costs_credits], columns.last(2)
     assert_equal columns, LedgerTransaction.column_names & columns, "every column exists"
     LedgerTransaction.columns_hash.values_at(*columns).each do |column|
-      assert_equal [ "bigint", false, "0" ], [ column.sql_type, column.null, column.default ], column.name
+      assert_equal [ "bigint", false, nil ], [ column.sql_type, column.null, column.default ], column.name
     end
   end
 

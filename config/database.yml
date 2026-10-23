@@ -14,6 +14,7 @@ development:
   primary:
     <<: *default
     database: storage/development.sqlite3
+    schema_format: sql
   queue:
     <<: *default
     database: storage/development_queue.sqlite3
@@ -25,6 +26,7 @@ development:
 test:
   <<: *default
   database: storage/test.sqlite3
+  schema_format: sql
 
 # Store production database in the storage/ directory, which by default
 # is mounted as a persistent Docker volume in config/deploy.yml.
@@ -32,6 +34,7 @@ production:
   primary:
     <<: *default
     database: storage/production.sqlite3
+    schema_format: sql
   cache:
     <<: *default
     database: storage/production_cache.sqlite3

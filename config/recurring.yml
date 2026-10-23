@@ -16,6 +16,9 @@ development: &scheduled
   price_rollup:
     class: PriceRollupJob
     schedule: every hour at minute 7
+  session_cleanup:
+    class: SessionCleanupJob
+    schedule: every day at 4am
 
 production:
   <<: *scheduled

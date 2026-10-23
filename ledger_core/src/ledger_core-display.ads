@@ -94,7 +94,8 @@ package Ledger_Core.Display with SPARK_Mode is
 
    --  Evenly spaced increasing sample times from Start to Finish, at most
    --  Times'Length of them (the caller's buffer size, 1 .. Max_Points).
-   --  Bad_Argument: empty buffer or Start > Finish. Out_Of_Range: buffer
+   --  Bad_Argument: empty buffer, a buffer not indexed from 1 (checked at
+   --  run time, not by a precondition) or Start > Finish. Out_Of_Range: buffer
    --  larger than Max_Points, Start < 0 or Finish > Max_Time. When
    --  Start = Finish or the buffer holds one time, Count = 1, Step = 1 and
    --  Times (1) = Finish. Otherwise, with Span = Finish - Start:
@@ -111,7 +112,6 @@ package Ledger_Core.Display with SPARK_Mode is
       Step   : out Int64;
       Result : out Status)
    with
-     Pre  => Times'First = 1,
      Post =>
        (if Result = Ok then
           Start <= Finish

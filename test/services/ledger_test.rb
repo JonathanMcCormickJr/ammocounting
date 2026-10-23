@@ -38,6 +38,21 @@ class LedgerTest < ActiveSupport::TestCase
     end
   end
 
+  test "a failed revaluation fails the tick job loudly after the ticks and the other users are stored" do
+    Ledger.register_tick_hook
+    fund(users(:one))
+    Ledger::Buy.call(users(:one), calibers(:nine_mm), 1000)
+    index = Object.new
+    index.define_singleton_method(:current_prices) do |now:|
+      [ { caliber_id: Caliber.find_by!(slug: "9mm").id, as_of: now, price_centicents: 2700 } ]
+    end
+    failing = ->(*) { raise LedgerEngine::Error.new(:out_of_range, :revalue) }
+    with_singleton(LedgerEngine, :revalue, failing) do
+      assert_raises(Ledger::RevalueFailed) { TickRunner.call(now: Time.utc(2026, 1, 1, 0, 10), index: index) }
+    end
+    assert_equal 2700, PriceTick.latest_by_caliber[calibers(:nine_mm).id].price_centicents
+  end
+
   test "TickRunner revalues holders after a tick when the hook is registered" do
     Ledger.register_tick_hook
     fund(users(:one))

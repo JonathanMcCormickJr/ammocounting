@@ -71,10 +71,14 @@ module LedgerEngine
       layout :open, :int64, :high, :int64, :low, :int64, :close, :int64, :ticks, :int64, :last_as_of, :int64
     end
 
-    {
+    SIGNATURES = {
       engine_version: [ [], :int32 ],
       validate_transaction: [ %i[int32 pointer], :int32 ],
       apply_transaction: [ %i[int32 pointer pointer pointer], :int32 ],
+      apply_deposit: [ %i[pointer pointer pointer], :int32 ],
+      apply_buy: [ %i[pointer pointer pointer], :int32 ],
+      apply_sell: [ %i[pointer pointer pointer], :int32 ],
+      apply_revalue: [ %i[pointer pointer pointer], :int32 ],
       diff_totals: [ %i[pointer pointer pointer], :int32 ],
       collapse_kinds: [ %i[pointer pointer], :int32 ],
       audit_chain: [ %i[int32 pointer], :int32 ],
@@ -93,6 +97,7 @@ module LedgerEngine
       income_statement: [ %i[pointer int64 pointer], :int32 ],
       cash_flow: [ %i[pointer int64 int64 pointer], :int32 ],
       period_report: [ %i[pointer pointer int64 pointer], :int32 ],
+      period_report_checked: [ %i[pointer pointer pointer pointer], :int32 ],
       split_money: [ %i[int64 pointer], :int32 ],
       split_price: [ %i[int64 pointer], :int32 ],
       negate: [ %i[int64 pointer], :int32 ],
@@ -103,6 +108,11 @@ module LedgerEngine
       bps_from_random: [ %i[uint64 int64 pointer], :int32 ],
       ohlc: [ %i[int32 pointer pointer], :int32 ],
       ohlc_merge: [ %i[int32 pointer pointer], :int32 ]
-    }.each { |name, (args, ret)| attach_function name, :"ledger_core_#{name}", args, ret }
+    }.freeze
+
+    SIGNATURES.each { |name, (args, ret)| attach_function name, :"ledger_core_#{name}", args, ret }
+
+    # Refuse to run against any engine this wrapper was not written for.
+    LedgerEngine.verify_version!(engine_version)
   end
 end

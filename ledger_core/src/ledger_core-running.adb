@@ -2,12 +2,27 @@ package body Ledger_Core.Running with SPARK_Mode is
 
    use Transactions;
 
-   procedure Apply_Transaction
+   --  Apply_Transaction on private copies of its inputs: Next, Set and Prev
+   --  are distinct objects here, so writing Next can never change what is
+   --  still to be read (audit E8).
+   procedure Apply_Copy
      (Kind   : Int32;
       Set    : Wire.Posting_Set;
       Prev   : Wire.Totals;
       Next   : out Wire.Totals;
       Result : out Status)
+   with
+     Post =>
+       (if Result = Ok then
+          Kind in Kind_Code
+          and then Transactions.Valid_Set (Set)
+          and then Valid (Prev)
+          and then Balanced (Prev)
+          and then Valid (Next)
+          and then Balanced (Next)
+          and then Books_Sound (Next)
+          and then Adds_Exactly (Kind, Set, Prev, Next)
+        else Next = Zero_Totals)
    is
       Cells : Wire.Totals := Prev;
    begin
@@ -81,13 +96,72 @@ package body Ledger_Core.Running with SPARK_Mode is
          Next   := Cells;
          Result := Ok;
       end if;
+   end Apply_Copy;
+
+   procedure Apply_Transaction
+     (Kind   : Int32;
+      Set    : Wire.Posting_Set;
+      Prev   : Wire.Totals;
+      Next   : out Wire.Totals;
+      Result : out Status)
+   is
+      --  Read every input before Next is written.
+      Local_Set  : constant Wire.Posting_Set := Set;
+      Local_Prev : constant Wire.Totals := Prev;
+      Cells      : Wire.Totals;
+   begin
+      Apply_Copy (Kind, Local_Set, Local_Prev, Cells, Result);
+      Next := Cells;
    end Apply_Transaction;
 
-   procedure Diff_Totals
+   procedure Apply_Typed
+     (Kind   : Int32;
+      Set    : Wire.Posting_Set;
+      Prev   : Wire.Totals;
+      Next   : out Wire.Totals;
+      Result : out Status)
+   is
+      Local_Set  : constant Wire.Posting_Set := Set;
+      Local_Prev : constant Wire.Totals := Prev;
+      Cells      : Wire.Totals := Zero_Totals;
+   begin
+      if Kind not in Kind_Code then
+         Result := Bad_Argument;
+      else
+         Validate_Set (Local_Set, Result);
+         if Result /= Ok then
+            null;
+         elsif not Has_Shape (Kind, Postings_Of (Local_Set)) then
+            Result := Bad_Argument;
+         else
+            Apply_Copy (Kind, Local_Set, Local_Prev, Cells, Result);
+         end if;
+      end if;
+      Next := Cells;
+   end Apply_Typed;
+
+   --  Diff_Totals on private copies of its inputs (see Apply_Copy).
+   procedure Diff_Copy
      (To     : Wire.Totals;
       From   : Wire.Totals;
       Diff   : out Wire.Totals;
       Result : out Status)
+   with
+     Post =>
+       (if Result = Ok then
+          Valid (To) and then Valid (From)
+          and then Balanced (To) and then Balanced (From)
+          and then Not_Less (To, From)
+          and then Valid (Diff)
+          and then Balanced (Diff)
+          and then
+            (for all K in 0 .. 3 =>
+               (for all A in 1 .. 5 =>
+                  Diff (K, A).Debits = To (K, A).Debits - From (K, A).Debits
+                  and then
+                    Diff (K, A).Credits =
+                      To (K, A).Credits - From (K, A).Credits))
+        else Diff = Zero_Totals)
    is
    begin
       Diff := Zero_Totals;
@@ -127,6 +201,21 @@ package body Ledger_Core.Running with SPARK_Mode is
          end loop;
          Result := Ok;
       end if;
+   end Diff_Copy;
+
+   procedure Diff_Totals
+     (To     : Wire.Totals;
+      From   : Wire.Totals;
+      Diff   : out Wire.Totals;
+      Result : out Status)
+   is
+      --  Read both inputs before Diff is written (audit E8).
+      Local_To   : constant Wire.Totals := To;
+      Local_From : constant Wire.Totals := From;
+      Delta_Sums : Wire.Totals;
+   begin
+      Diff_Copy (Local_To, Local_From, Delta_Sums, Result);
+      Diff := Delta_Sums;
    end Diff_Totals;
 
    procedure Collapse_Kinds
@@ -134,21 +223,21 @@ package body Ledger_Core.Running with SPARK_Mode is
       Collapsed : out Wire.Account_Totals;
       Result    : out Status)
    is
+      Sums : Wire.Account_Totals := (others => (0, 0));
    begin
-      Collapsed := (others => (0, 0));
       if not Valid (Totals) then
          Result := Out_Of_Range;
       else
          for A in 1 .. 5 loop
             pragma Loop_Invariant
               (for all AA in 1 .. A - 1 =>
-                 Big (Collapsed (AA).Debits) =
+                 Big (Sums (AA).Debits) =
                    Account_Debits (Totals, Account_Code (AA))
-                 and then Big (Collapsed (AA).Credits) =
+                 and then Big (Sums (AA).Credits) =
                    Account_Credits (Totals, Account_Code (AA))
-                 and then Collapsed (AA).Debits in 0 .. Max_Aggregate
-                 and then Collapsed (AA).Credits in 0 .. Max_Aggregate);
-            Collapsed (A) :=
+                 and then Sums (AA).Debits in 0 .. Max_Aggregate
+                 and then Sums (AA).Credits in 0 .. Max_Aggregate);
+            Sums (A) :=
               (Debits  => Totals (0, A).Debits + Totals (1, A).Debits
                           + Totals (2, A).Debits + Totals (3, A).Debits,
                Credits => Totals (0, A).Credits + Totals (1, A).Credits
@@ -156,6 +245,7 @@ package body Ledger_Core.Running with SPARK_Mode is
          end loop;
          Result := Ok;
       end if;
+      Collapsed := Sums;
    end Collapse_Kinds;
 
    procedure Audit_Chain (Rows : Wire.Totals_Array; Result : out Status) is

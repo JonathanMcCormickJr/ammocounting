@@ -53,6 +53,7 @@
         <td>
           <%= form_with scope: :trade, url: trades_path do |form| %>
             <%= form.hidden_field :caliber_slug, value: caliber.slug, id: nil %>
+            <%= form.hidden_field :nonce, value: Ledger.new_nonce, id: nil %>
             <%= form.number_field :quantity, min: 1, step: 1, required: true, "aria-label": "Rounds of #{caliber.name}", id: nil %>
             <%= form.button "Buy", name: "trade[side]", value: "buy", id: nil %>
             <%= form.button "Sell", name: "trade[side]", value: "sell", id: nil %>

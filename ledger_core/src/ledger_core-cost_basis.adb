@@ -43,6 +43,65 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
       end if;
    end Lemma_Buys_Monotone;
 
+   procedure Lemma_Until_Tail
+     (Trades : Wire.Trade_Array; From, Mid, To : Natural; T : Int64)
+   is
+   begin
+      if To > Mid then
+         Lemma_Until_Tail (Trades, From, Mid, To - 1, T);
+      end if;
+   end Lemma_Until_Tail;
+
+   procedure Lemma_Until_Same
+     (Trades : Wire.Trade_Array; From, To : Natural; T0, T1 : Int64)
+   is
+   begin
+      if To > From then
+         Lemma_Until_Same (Trades, From, To - 1, T0, T1);
+      end if;
+   end Lemma_Until_Same;
+
+   procedure Lemma_Until_Split
+     (Trades : Wire.Trade_Array; From, Mid, To : Natural; T : Int64)
+   is
+   begin
+      if To > Mid then
+         Lemma_Until_Split (Trades, From, Mid, To - 1, T);
+      end if;
+   end Lemma_Until_Split;
+
+   procedure Lemma_Until_Slice
+     (Trades : Wire.Trade_Array; First, Last, To : Natural; T : Int64)
+   is
+   begin
+      if To > First then
+         Lemma_Until_Slice (Trades, First, Last, To - 1, T);
+      end if;
+   end Lemma_Until_Slice;
+
+   procedure Lemma_Value_Until
+     (Trades : Wire.Trade_Array; From, To : Natural; T : Int64)
+   is
+   begin
+      if To > From then
+         Lemma_Value_Until (Trades, From, To - 1, T);
+      end if;
+   end Lemma_Value_Until;
+
+   procedure Lemma_Later_Times
+     (Trades : Wire.Trade_Array; K : Natural; T : Int64)
+   is
+   begin
+      for J in K .. Trades'Last loop
+         pragma Loop_Invariant
+           (for all I in K .. J - 1 => Trades (I).Time > T);
+         pragma Loop_Invariant (J = K or else Trades (J - 1).Time > T);
+         if J > K then
+            pragma Assert (Trades (J - 1).Time <= Trades (J).Time);
+         end if;
+      end loop;
+   end Lemma_Later_Times;
+
    --  ---- Weighted average ----
 
    procedure Apply_Average
@@ -93,37 +152,96 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
       Snap_P  : Big := 0;
       Snap_C  : Big := 0;
       Sales   : Big := 0;
+      K       : Natural := Trades'First;
+      --  The index at which the start snapshot was taken (proof only).
+      Snap_At : Natural := Trades'First
+      with Ghost;
+      --  Set when the replay reached a trade after T_End (K stays on it).
+      Stopped : Boolean := False;
    begin
       Result := Ok;
-      for I in Trades'Range loop
+      while not Stopped and then K <= Trades'Last loop
          pragma Loop_Invariant (Result = Ok);
-         pragma Loop_Invariant (Conserved (Pos, I - Trades'First));
          pragma Loop_Invariant
-           (Sales in 0 .. Big (Max_Amount) * Big (I - Trades'First));
+           (if Stopped then
+              Snapped and then K <= Trades'Last
+              and then Trades (K).Time > T_End);
+         pragma Loop_Invariant (K in Trades'First .. Trades'Last + 1);
+         pragma Loop_Invariant (Conserved (Pos, K - Trades'First));
+         pragma Loop_Invariant
+           (Sales in 0 .. Big (Max_Amount) * Big (K - Trades'First));
          pragma Loop_Invariant
            (if Snapped then
               Snap_C in 0 .. Snap_P
               and then Snap_P <= Pos.Purchased
               and then Snap_C <= Pos.Consumed);
-         if not Snapped and then Trades (I).Time > T_Start then
+         --  What has been replayed is exactly what the ghost sums say.
+         pragma Loop_Invariant
+           (Pos.Purchased = Buys_Until (Trades, Trades'First, K, T_End));
+         pragma Loop_Invariant
+           (Sales = Sells_Until (Trades, Trades'First, K, T_End)
+                    - Sells_Until (Trades, Trades'First, K, T_Start));
+         pragma Loop_Invariant
+           (for all J in Trades'First .. K - 1 => Trades (J).Time <= T_End);
+         pragma Loop_Invariant
+           (if not Snapped then
+              (for all J in Trades'First .. K - 1 =>
+                 Trades (J).Time <= T_Start));
+         pragma Loop_Invariant
+           (if Snapped then
+              Snap_At in Trades'First .. Trades'Last
+              and then Snap_At <= K
+              and then Trades (Snap_At).Time > T_Start
+              and then Snap_P =
+                         Buys_Until
+                           (Trades, Trades'First, Snap_At, T_Start));
+         if not Snapped and then Trades (K).Time > T_Start then
+            Lemma_Until_Same (Trades, Trades'First, K, T_Start, T_End);
             Snap_P  := Pos.Purchased;
             Snap_C  := Pos.Consumed;
             Snapped := True;
+            Snap_At := K;
          end if;
-         exit when Trades (I).Time > T_End;
-         Apply_Average (Pos, Trades (I), I - Trades'First, Result);
-         if Result /= Ok then
-            Seg := (others => 0);
-            return;
-         end if;
-         if Trades (I).Side = Sell and then Trades (I).Time > T_Start then
-            Sales := Sales + Big (Trades (I).Value);
+         if Trades (K).Time > T_End then
+            --  After T_End, hence after T_Start: the snapshot was taken.
+            Stopped := True;
+         else
+            Apply_Average (Pos, Trades (K), K - Trades'First, Result);
+            if Result /= Ok then
+               Seg := (others => 0);
+               return;
+            end if;
+            if Trades (K).Side = Sell and then Trades (K).Time > T_Start then
+               Sales := Sales + Big (Trades (K).Value);
+            end if;
+            K := K + 1;
          end if;
       end loop;
 
+      --  Everything from K on is after T_End (hence after T_Start): it adds
+      --  nothing to the sums up to the end of the trades.
+      if K <= Trades'Last then
+         Lemma_Later_Times (Trades, K, T_End);
+         pragma Assert
+           (for all J in K .. Trades'Last => Trades (J).Time > T_Start);
+         Lemma_Until_Tail
+           (Trades, Trades'First, K, Trades'Last + 1, T_End);
+         Lemma_Until_Tail
+           (Trades, Trades'First, K, Trades'Last + 1, T_Start);
+      end if;
+
       if not Snapped then
+         pragma Assert (not Stopped);
+         pragma Assert (not (K <= Trades'Last));
+         pragma Assert (K = Trades'Last + 1);
+         Lemma_Until_Same
+           (Trades, Trades'First, Trades'Last + 1, T_Start, T_End);
          Snap_P := Pos.Purchased;
          Snap_C := Pos.Consumed;
+      else
+         Lemma_Later_Times (Trades, Snap_At, T_Start);
+         Lemma_Until_Tail
+           (Trades, Trades'First, Snap_At, Trades'Last + 1, T_Start);
       end if;
       Seg :=
         (Start_Purchased => Snap_P,
@@ -249,8 +367,26 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
               and then Snap_P = Buys_Value (Trades, Trades'First, Snap_At)
               and then Snap_C in 0 .. Snap_P
               and then Snap_C <= Consumed_Of (S));
+         --  What has been replayed is exactly what the ghost sums say.
+         pragma Loop_Invariant
+           (Sales = Sells_Until (Trades, Trades'First, K, T_End)
+                    - Sells_Until (Trades, Trades'First, K, T_Start));
+         pragma Loop_Invariant
+           (for all J in Trades'First .. K - 1 => Trades (J).Time <= T_End);
+         pragma Loop_Invariant
+           (if not Snapped then
+              (for all J in Trades'First .. K - 1 =>
+                 Trades (J).Time <= T_Start));
+         pragma Loop_Invariant
+           (if Snapped then
+              Snap_At in Trades'First .. Trades'Last
+              and then Trades (Snap_At).Time > T_Start
+              and then Snap_P =
+                         Buys_Until
+                           (Trades, Trades'First, Snap_At, T_Start));
          if not Snapped and then Trades (K).Time > T_Start then
             Finish (Trades, K, S, Snap_P, Unused);
+            Lemma_Value_Until (Trades, Trades'First, K, T_Start);
             Snap_C  := Consumed_Of (S);
             Snap_At := K;
             Snapped := True;
@@ -283,12 +419,28 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
       end loop;
 
       if not Snapped then
+         pragma Assert (K = Trades'Last + 1);
          Finish (Trades, K, S, Snap_P, Unused);
+         Lemma_Value_Until (Trades, Trades'First, K, T_Start);
          Snap_C  := Consumed_Of (S);
          Snap_At := K;
+      else
+         Lemma_Later_Times (Trades, Snap_At, T_Start);
+         Lemma_Until_Tail
+           (Trades, Trades'First, Snap_At, Trades'Last + 1, T_Start);
       end if;
       Finish (Trades, K, S, End_P, Unused);
       Lemma_Buys_Monotone (Trades, Trades'First, Snap_At, K);
+      Lemma_Value_Until (Trades, Trades'First, K, T_End);
+      if K <= Trades'Last then
+         Lemma_Later_Times (Trades, K, T_End);
+         pragma Assert
+           (for all J in K .. Trades'Last => Trades (J).Time > T_Start);
+         Lemma_Until_Tail
+           (Trades, Trades'First, K, Trades'Last + 1, T_End);
+         Lemma_Until_Tail
+           (Trades, Trades'First, K, Trades'Last + 1, T_Start);
+      end if;
       Seg :=
         (Start_Purchased => Snap_P,
          Start_Consumed  => Snap_C,
@@ -323,10 +475,14 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
       Validate_Trades (Trades, Result);
       if Result /= Ok then
          return;
-      elsif Trades'Length = 0 then
-         return;
-      elsif Trades'Last = Positive'Last then
+      elsif Trades'Last not in 0 .. Positive'Last - 1
+        or else Trades'Last < Trades'First - 1
+      then
+         --  (Last = Positive'Last: more trades than the index arithmetic
+         --  allows; the others cannot be built from a C count.)
          Result := Out_Of_Range;
+         return;
+      elsif Trades'Length = 0 then
          return;
       end if;
 
@@ -348,6 +504,14 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
             pragma Loop_Invariant
               (I = Trades'First
                or else Trades (I - 1).Caliber < Trades (I).Caliber);
+            --  The totals so far are the ghost sums over the trades so far.
+            pragma Loop_Invariant
+              (End_P = Buys_Until (Trades, Trades'First, I, T_End));
+            pragma Loop_Invariant
+              (Start_P = Buys_Until (Trades, Trades'First, I, T_Start));
+            pragma Loop_Invariant
+              (Sales = Sells_Until (Trades, Trades'First, I, T_End)
+                       - Sells_Until (Trades, Trades'First, I, T_Start));
             J := I;
             while J < Trades'Last
               and then Trades (J + 1).Caliber = Trades (I).Caliber
@@ -371,6 +535,13 @@ package body Ledger_Core.Cost_Basis with SPARK_Mode is
                if Result /= Ok then
                   return;
                end if;
+               --  The segment's sums are over its slice; they are the sums
+               --  over the same index range of the whole, added to those
+               --  before it.
+               Lemma_Until_Slice (Trades, I, J, J + 1, T_Start);
+               Lemma_Until_Slice (Trades, I, J, J + 1, T_End);
+               Lemma_Until_Split (Trades, Trades'First, I, J + 1, T_Start);
+               Lemma_Until_Split (Trades, Trades'First, I, J + 1, T_End);
                Start_P := Start_P + Seg.Start_Purchased;
                Start_C := Start_C + Seg.Start_Consumed;
                End_P   := End_P + Seg.End_Purchased;

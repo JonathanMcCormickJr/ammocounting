@@ -118,25 +118,61 @@ module Statements
         error = assert_raises(Ledger::IntegrityError) { Builder.balance_sheet(@user, Time.current) }
         assert_includes error.message, "unbalanced"
       end
-      failing_report = ->(*) { raise LedgerEngine::Error.new(:not_reconciled, :period_report) }
-      with_singleton(LedgerEngine, :period_report, failing_report) do
+      failing_report = ->(*) { raise LedgerEngine::Error.new(:not_reconciled, :period_report_checked) }
+      with_singleton(LedgerEngine, :period_report_checked, failing_report) do
         error = assert_raises(Ledger::IntegrityError) { Builder.period(@user, full_period) }
         assert_includes error.message, "not_reconciled"
       end
     end
 
+    test "the statements are built by period_report_checked from the same period's cost basis report" do
+      period = full_period
+      basis = LedgerEngine.cost_basis(method: @user.cost_basis_method, trades: @user.trades.engine_rows,
+        t_start: period.from.to_i, t_end: period.to.to_i)
+      seen = []
+      real = LedgerEngine.method(:period_report_checked)
+      spy = ->(opening, closing, given) { seen << given; real.call(opening, closing, given) }
+      generic = ->(*) { raise "unchecked period_report used" }
+      with_singleton(LedgerEngine, :period_report_checked, spy) do
+        with_singleton(LedgerEngine, :period_report, generic) { Builder.period(@user, period) }
+      end
+      assert_equal [ basis ], seen
+    end
+
+    test "a ledger the trades disagree with is never rendered (Not_Reconciled is an IntegrityError)" do
+      period = full_period
+      real = LedgerEngine.method(:cost_basis)
+      forged = ->(**args) { real.call(**args).with(basis_at_end: 1) }
+      with_singleton(LedgerEngine, :cost_basis, forged) do
+        error = assert_raises(Ledger::IntegrityError) { Builder.period(@user, period) }
+        assert_includes error.message, "not_reconciled in period_report_checked"
+        assert_includes error.message, "not shown"
+      end
+    end
+
+    test "a missing trade (ledger and trades tell different stories) is not rendered" do
+      without_ledger_triggers { Trade.where(id: Trade.where(user: @user).order(:id).first.id).delete_all }
+      error = assert_raises(Ledger::IntegrityError) { Builder.period(@user, full_period) }
+      assert_includes error.message, "not_reconciled"
+    end
+
     test "tampered running totals are caught by the engine, not rendered" do
-      tampered = Ledger::Totals.row_at(@user)
-      LedgerTransaction.where(id: tampered.id).update_all(buy_cash_debits: 1) # makes debits != credits
-      error = assert_raises(Ledger::IntegrityError) { Builder.balance_sheet(@user, Time.current) }
-      assert_includes error.message, "unbalanced in balance_sheet"
-      assert_raises(Ledger::IntegrityError) { Builder.period(@user, full_period) }
+      # The database refuses to store unbalanced totals (see LedgerDatabaseGuardsTest), so simulate
+      # corrupt storage by handing the engine unbalanced totals.
+      unbalanced = Array.new(40, 0).tap { _1[0] = 1 }
+      with_singleton(Ledger::Totals, :as_of, ->(*) { unbalanced }) do
+        error = assert_raises(Ledger::IntegrityError) { Builder.balance_sheet(@user, Time.current) }
+        assert_includes error.message, "unbalanced in balance_sheet"
+        assert_raises(Ledger::IntegrityError) { Builder.period(@user, full_period) }
+      end
     end
 
     test "a closing total below the opening one (reordered rows) is refused as bad_order" do
-      LedgerTransaction.where(id: Ledger::Totals.row_at(@user, H::T1).id).update_all(deposit_cash_debits: 177_700, deposit_capital_credits: 177_700)
+      without_ledger_triggers do
+        LedgerTransaction.where(id: Ledger::Totals.row_at(@user, H::T1).id).update_all(deposit_cash_debits: 177_700, deposit_capital_credits: 177_700)
+      end
       error = assert_raises(Ledger::IntegrityError) { Builder.period(@user, period(H::T1, H::T4)) }
-      assert_includes error.message, "bad_order in period_report"
+      assert_includes error.message, "bad_order in period_report_checked"
     end
   end
 end

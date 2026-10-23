@@ -63,6 +63,150 @@ package Ledger_Core.Running with SPARK_Mode is
             A (K, Acct).Debits >= B (K, Acct).Debits
             and then A (K, Acct).Credits >= B (K, Acct).Credits));
 
+   --  Next is Prev plus, for the posted Kind only, exactly the amounts the
+   --  postings of Set put on each account and side.
+   function Adds_Exactly
+     (Kind : Int32;
+      Set  : Wire.Posting_Set;
+      Prev : Wire.Totals;
+      Next : Wire.Totals) return Boolean
+   is
+     (for all K in 0 .. 3 =>
+        (for all A in 1 .. 5 =>
+           Big (Next (K, A).Debits) =
+             Big (Prev (K, A).Debits)
+             + (if Int32 (K) = Kind
+                then Transactions.Posted
+                       (Transactions.Postings_Of (Set),
+                        Transactions.Account_Code (A),
+                        Transactions.Debit)
+                else 0)
+           and then Big (Next (K, A).Credits) =
+             Big (Prev (K, A).Credits)
+             + (if Int32 (K) = Kind
+                then Transactions.Posted
+                       (Transactions.Postings_Of (Set),
+                        Transactions.Account_Code (A),
+                        Transactions.Credit)
+                else 0)))
+   with Pre => Transactions.Valid_Set (Set);
+
+   --  The posting shape each transaction kind may have (audit E4: a kind
+   --  must say what the postings are). With P (A, S) the amount posted on
+   --  account A, side S:
+   --    0 deposit : only Dr Cash / Cr Owner's Capital;
+   --    1 buy     : only Dr Holdings, Dr Trading Costs / Cr Cash, with
+   --                Cr Cash > 0;
+   --    2 sell    : only Dr Cash, Dr Trading Costs / Cr Holdings, with
+   --                Cr Holdings > 0;
+   --    3 revalue : only Dr Holdings / Cr Trading Gain/Loss (a gain) or only
+   --                Dr Trading Gain/Loss / Cr Holdings (a loss), not both.
+   --  Together with the set balancing, this makes each kind's postings
+   --  exactly what the matching builder produces (up to splitting an amount
+   --  over several postings of the same account and side).
+   function Has_Shape
+     (Kind : Kind_Code; Postings : Wire.Posting_Array) return Boolean
+   is
+     (case Kind is
+        when 0 =>
+          Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Debit) > 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Credit) > 0
+          and then Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Holdings_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Holdings_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Credit) = 0,
+        when 1 =>
+          Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Credit) > 0
+          and then Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Holdings_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Credit) = 0,
+        when 2 =>
+          Transactions.Posted
+            (Postings, Transactions.Holdings_Account, Transactions.Credit) > 0
+          and then Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Holdings_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Gain_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Credit) = 0,
+        when 3 =>
+          Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Cash_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Capital_Account, Transactions.Credit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Debit) = 0
+          and then Transactions.Posted
+            (Postings, Transactions.Costs_Account, Transactions.Credit) = 0
+          and then
+            ((Transactions.Posted
+                (Postings, Transactions.Holdings_Account,
+                 Transactions.Debit) > 0
+              and then Transactions.Posted
+                (Postings, Transactions.Gain_Account,
+                 Transactions.Credit) > 0
+              and then Transactions.Posted
+                (Postings, Transactions.Holdings_Account,
+                 Transactions.Credit) = 0
+              and then Transactions.Posted
+                (Postings, Transactions.Gain_Account,
+                 Transactions.Debit) = 0)
+             or else
+               (Transactions.Posted
+                  (Postings, Transactions.Gain_Account,
+                   Transactions.Debit) > 0
+                and then Transactions.Posted
+                  (Postings, Transactions.Holdings_Account,
+                   Transactions.Credit) > 0
+                and then Transactions.Posted
+                  (Postings, Transactions.Holdings_Account,
+                   Transactions.Debit) = 0
+                and then Transactions.Posted
+                  (Postings, Transactions.Gain_Account,
+                   Transactions.Credit) = 0)))
+   with
+     Pre =>
+       Postings'Length <= Max_Postings
+       and then (for all P of Postings => Transactions.Well_Formed (P));
+
    --  Adds the postings of Set to Prev under Kind. Checks, in order: Kind in
    --  0 .. 3 and the set valid (Bad_Argument, Out_Of_Range, Unbalanced as in
    --  Transactions.Validate_Set); Prev valid (Out_Of_Range) and balanced
@@ -70,7 +214,10 @@ package Ledger_Core.Running with SPARK_Mode is
    --  not negative afterwards (Negative_Balance). When Ok, every cell of
    --  Next equals the same cell of Prev plus exactly what the postings put
    --  on that account and side (for the posted Kind only), and Next is valid
-   --  and balanced.
+   --  and balanced. This general entry point does NOT bind Kind to the
+   --  posting shape; the typed entry point Apply_Typed does. The inputs are
+   --  copied before Next is written, so Next may even overlap Prev or Set
+   --  without bypassing any check.
    procedure Apply_Transaction
      (Kind   : Int32;
       Set    : Wire.Posting_Set;
@@ -87,25 +234,33 @@ package Ledger_Core.Running with SPARK_Mode is
           and then Valid (Next)
           and then Balanced (Next)
           and then Books_Sound (Next)
-          and then
-            (for all K in 0 .. 3 =>
-               (for all A in 1 .. 5 =>
-                  Big (Next (K, A).Debits) =
-                    Big (Prev (K, A).Debits)
-                    + (if Int32 (K) = Kind
-                       then Transactions.Posted
-                              (Transactions.Postings_Of (Set),
-                               Transactions.Account_Code (A),
-                               Transactions.Debit)
-                       else 0)
-                  and then Big (Next (K, A).Credits) =
-                    Big (Prev (K, A).Credits)
-                    + (if Int32 (K) = Kind
-                       then Transactions.Posted
-                              (Transactions.Postings_Of (Set),
-                               Transactions.Account_Code (A),
-                               Transactions.Credit)
-                       else 0)))
+          and then Adds_Exactly (Kind, Set, Prev, Next)
+        else Next = Zero_Totals);
+
+   --  Apply_Transaction for a set that must have the posting shape of Kind
+   --  (see Has_Shape): the typed entry points deposit (0), buy (1), sell (2)
+   --  and revalue (3). Kind outside 0 .. 3 is Bad_Argument; the set is
+   --  validated first (statuses as for Apply_Transaction); a valid set of
+   --  the wrong shape for Kind is Bad_Argument; then the remaining checks
+   --  and results are exactly those of Apply_Transaction.
+   procedure Apply_Typed
+     (Kind   : Int32;
+      Set    : Wire.Posting_Set;
+      Prev   : Wire.Totals;
+      Next   : out Wire.Totals;
+      Result : out Status)
+   with
+     Post =>
+       (if Result = Ok then
+          Kind in Kind_Code
+          and then Transactions.Valid_Set (Set)
+          and then Has_Shape (Kind, Transactions.Postings_Of (Set))
+          and then Valid (Prev)
+          and then Balanced (Prev)
+          and then Valid (Next)
+          and then Balanced (Next)
+          and then Books_Sound (Next)
+          and then Adds_Exactly (Kind, Set, Prev, Next)
         else Next = Zero_Totals);
 
    --  Period activity: Diff = To - From, cell by cell. Both must be valid

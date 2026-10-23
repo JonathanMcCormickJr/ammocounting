@@ -59,8 +59,50 @@ module Ledger
       assert Poster.call(users(:one), kind: :deposit, at: AT, postings: DEPOSIT_500), "the same second is fine"
     end
 
+    test "posts each kind through its typed engine entry point, never the generic apply_transaction" do
+      fund(users(:one))
+      called = []
+      spies = %i[apply_deposit apply_buy apply_sell apply_revalue].map do |name|
+        original = LedgerEngine.method(name)
+        [ name, ->(*args) { called << name; original.call(*args) } ]
+      end
+      guard = ->(*) { raise "generic apply_transaction used" }
+      with_spies(spies) do
+        with_singleton(LedgerEngine, :apply_transaction, guard) do
+          Poster.call(users(:one), kind: :deposit, at: AT, postings: DEPOSIT_500)
+          Poster.call(users(:one), kind: :buy, at: AT, postings: [ [ 2, 0, 100 ], [ 5, 0, 1 ], [ 1, 1, 101 ] ])
+          Poster.call(users(:one), kind: :revalue, at: AT, postings: [ [ 2, 0, 5 ], [ 4, 1, 5 ] ])
+          Poster.call(users(:one), kind: :sell, at: AT, postings: [ [ 1, 0, 90 ], [ 5, 0, 1 ], [ 2, 1, 91 ] ])
+        end
+      end
+      assert_equal %i[apply_deposit apply_buy apply_revalue apply_sell], called
+    end
+
+    test "refuses postings whose shape does not fit the kind and persists nothing" do
+      assert_no_difference [ "LedgerTransaction.count", "LedgerPosting.count" ] do
+        error = assert_raises(LedgerEngine::Error) do
+          Poster.call(users(:one), kind: :sell, at: AT, postings: DEPOSIT_500)
+        end
+        assert_equal :bad_argument, error.status
+        assert_equal :apply_sell, error.operation
+      end
+    end
+
+    test "an unknown kind is a programming error and persists nothing" do
+      assert_no_difference "LedgerTransaction.count" do
+        assert_raises(KeyError) { Poster.call(users(:one), kind: :withdrawal, at: AT, postings: DEPOSIT_500) }
+      end
+    end
+
+    def with_spies(spies, &block)
+      return yield if spies.empty?
+
+      (name, impl), *rest = spies
+      with_singleton(LedgerEngine, name, impl) { with_spies(rest, &block) }
+    end
+
     test "rolls back the transaction if a posting cannot be saved" do
-      with_singleton(LedgerEngine, :apply_transaction, ->(_kind, _postings, _previous) { LedgerEngine::ZERO_TOTALS }) do
+      with_singleton(LedgerEngine, :apply_deposit, ->(_postings, _previous) { LedgerEngine::ZERO_TOTALS }) do
         assert_no_difference "LedgerTransaction.count" do
           assert_raises(ActiveRecord::RecordInvalid) do
             Poster.call(users(:one), kind: :deposit, at: AT, postings: [ [ 1, 0, 10**13 ], [ 3, 1, 10**13 ] ])

@@ -190,4 +190,15 @@ begin
       Check.Is_Status ("buffer at max", Result, Ok);
       Check.Eq ("buffer at max count", Count, 11);
    end;
+   --  E9: a buffer not indexed from 1 is refused at run time (there is no
+   --  precondition: contracts are not evaluated in the shipped library).
+   declare
+      Shifted : Wire.Int64_Array (2 .. 6) := (others => 7);
+   begin
+      Sample_Times (0, 10, Shifted, Count, Step, Result);
+      Check.Is_Status ("buffer not starting at 1", Result, Bad_Argument);
+      Check.Eq ("buffer not starting at 1: count", Count, 0);
+      Check.Eq ("buffer not starting at 1: step", Step, 0);
+      Check.Eq ("buffer not starting at 1: zeroed", Shifted (2), 0);
+   end;
 end Test_Display;

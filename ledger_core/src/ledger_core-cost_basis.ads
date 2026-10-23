@@ -101,6 +101,147 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
        and then Buys_Qty (Trades, From, A) <= Buys_Qty (Trades, From, B),
      Subprogram_Variant => (Decreases => B);
 
+   --  The index arithmetic of the ghost sums (Trades'Last + 1) cannot
+   --  overflow or go negative.
+   function Sane (Trades : Wire.Trade_Array) return Boolean is
+     (Trades'Last >= Trades'First - 1 and then Trades'Last >= 0
+      and then Trades'Last < Positive'Last);
+
+   --  Exact sums over the trades in the index range From .. To - 1 that are
+   --  not after time T (Time <= T). They state what the replay must compute
+   --  (audit E1): the cost of the buys up to T, and the value of the sells
+   --  up to T; the sales in a period (T_Start, T_End] are
+   --  Sells_Until (T_End) - Sells_Until (T_Start). Independent of the order
+   --  of the trades and of the replay.
+   function Buys_Until
+     (Trades : Wire.Trade_Array; From, To : Natural; T : Int64) return Big
+   is
+     (if To <= From then 0
+      else Buys_Until (Trades, From, To - 1, T)
+           + (if Trades (To - 1).Side = Buy and then Trades (To - 1).Time <= T
+              then Big (Trades (To - 1).Value) else 0))
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X)),
+     Post               =>
+       Buys_Until'Result in
+         0 .. Big (Max_Amount) * Big (Integer'Max (To - From, 0)),
+     Subprogram_Variant => (Decreases => To - From);
+
+   function Sells_Until
+     (Trades : Wire.Trade_Array; From, To : Natural; T : Int64) return Big
+   is
+     (if To <= From then 0
+      else Sells_Until (Trades, From, To - 1, T)
+           + (if Trades (To - 1).Side = Sell and then Trades (To - 1).Time <= T
+              then Big (Trades (To - 1).Value) else 0))
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X)),
+     Post               =>
+       Sells_Until'Result in
+         0 .. Big (Max_Amount) * Big (Integer'Max (To - From, 0)),
+     Subprogram_Variant => (Decreases => To - From);
+
+   --  Trades from Mid on that are all after T add nothing to either sum.
+   procedure Lemma_Until_Tail
+     (Trades : Wire.Trade_Array; From, Mid, To : Natural; T : Int64)
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then From <= Mid and then Mid <= To
+       and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X))
+       and then (for all J in Mid .. To - 1 => Trades (J).Time > T),
+     Post               =>
+       Buys_Until (Trades, From, To, T) = Buys_Until (Trades, From, Mid, T)
+       and then
+         Sells_Until (Trades, From, To, T)
+         = Sells_Until (Trades, From, Mid, T),
+     Subprogram_Variant => (Decreases => To);
+
+   --  When no trade of the range is after T0, moving the limit up to T1 adds
+   --  nothing.
+   procedure Lemma_Until_Same
+     (Trades : Wire.Trade_Array; From, To : Natural; T0, T1 : Int64)
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X))
+       and then T0 <= T1
+       and then (for all J in From .. To - 1 => Trades (J).Time <= T0),
+     Post               =>
+       Buys_Until (Trades, From, To, T0) = Buys_Until (Trades, From, To, T1)
+       and then
+         Sells_Until (Trades, From, To, T0)
+         = Sells_Until (Trades, From, To, T1),
+     Subprogram_Variant => (Decreases => To);
+
+   --  The sums over a range are the sums over its two parts.
+   procedure Lemma_Until_Split
+     (Trades : Wire.Trade_Array; From, Mid, To : Natural; T : Int64)
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then From <= Mid and then Mid <= To
+       and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X)),
+     Post               =>
+       Buys_Until (Trades, From, To, T) =
+         Buys_Until (Trades, From, Mid, T) + Buys_Until (Trades, Mid, To, T)
+       and then
+         Sells_Until (Trades, From, To, T) =
+           Sells_Until (Trades, From, Mid, T)
+           + Sells_Until (Trades, Mid, To, T),
+     Subprogram_Variant => (Decreases => To);
+
+   --  A slice of the trades has the same sums as the same range of the whole.
+   procedure Lemma_Until_Slice
+     (Trades : Wire.Trade_Array; First, Last, To : Natural; T : Int64)
+   with
+     Ghost,
+     Pre                =>
+       First >= Trades'First and then First <= To and then To - 1 <= Last
+       and then Last <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X)),
+     Post               =>
+       Buys_Until (Trades (First .. Last), First, To, T) =
+         Buys_Until (Trades, First, To, T)
+       and then
+         Sells_Until (Trades (First .. Last), First, To, T) =
+           Sells_Until (Trades, First, To, T),
+     Subprogram_Variant => (Decreases => To);
+
+   --  The range sum of the buys equals the sum of those up to T when none
+   --  of the range is after T.
+   procedure Lemma_Value_Until
+     (Trades : Wire.Trade_Array; From, To : Natural; T : Int64)
+   with
+     Ghost,
+     Pre                =>
+       From >= Trades'First and then To - 1 <= Trades'Last
+       and then (for all X of Trades => Valid_Trade (X))
+       and then (for all J in From .. To - 1 => Trades (J).Time <= T),
+     Post               =>
+       Buys_Value (Trades, From, To) = Buys_Until (Trades, From, To, T),
+     Subprogram_Variant => (Decreases => To);
+
+   --  In a one-caliber history (times never go back), once a trade is after
+   --  T, so is every later one.
+   procedure Lemma_Later_Times
+     (Trades : Wire.Trade_Array; K : Natural; T : Int64)
+   with
+     Ghost,
+     Pre  =>
+       K in Trades'Range and then One_Caliber (Trades)
+       and then Trades (K).Time > T,
+     Post => (for all J in K .. Trades'Last => Trades (J).Time > T);
+
    --  What a replay of one caliber yields.
    --  Start_*: state after the trades with Time <= T_Start; End_*: after the
    --  trades with Time <= T_End. Sales: value of the sells in the period.
@@ -126,6 +267,27 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
       and then S.End_Held in 0 .. Big (Max_Held)
       and then (if S.End_Held = 0 then S.End_Consumed = S.End_Purchased)
       and then S.Sales in 0 .. Big (Max_Amount) * Big (Count));
+
+   --  A replay of Trades reported the right money (audit E1): the cost of the
+   --  buys up to the start and up to the end, and the value of the sells in
+   --  the period (Start, End], exactly as the ghost sums define them.
+   function Replay_Is_Exact
+     (Trades  : Wire.Trade_Array;
+      T_Start : Int64;
+      T_End   : Int64;
+      Seg     : Segment) return Boolean
+   is
+     (Seg.Start_Purchased =
+        Buys_Until (Trades, Trades'First, Trades'Last + 1, T_Start)
+      and then Seg.End_Purchased =
+                 Buys_Until (Trades, Trades'First, Trades'Last + 1, T_End)
+      and then Seg.Sales =
+                 Sells_Until (Trades, Trades'First, Trades'Last + 1, T_End)
+                 - Sells_Until
+                     (Trades, Trades'First, Trades'Last + 1, T_Start))
+   with
+     Ghost,
+     Pre => Sane (Trades) and then (for all X of Trades => Valid_Trade (X));
 
    --  ---- Weighted average ----
 
@@ -188,9 +350,12 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
       Result  : out Status)
    with
      Pre  => Valid_Trades (Trades) and then One_Caliber (Trades)
-             and then T_Start <= T_End and then Trades'Length < Natural'Last,
+             and then T_Start <= T_End and then Trades'Length < Natural'Last
+             and then Sane (Trades),
      Post =>
-       (if Result = Ok then Sound (Seg, Trades'Length)
+       (if Result = Ok then
+          Sound (Seg, Trades'Length)
+          and then Replay_Is_Exact (Trades, T_Start, T_End, Seg)
         else Seg = Segment'(others => 0));
 
    --  ---- FIFO ----
@@ -326,7 +491,9 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
              and then Trades'Last >= Trades'First - 1
              and then Trades'Last < Positive'Last,
      Post =>
-       (if Result = Ok then Sound (Seg, Trades'Length)
+       (if Result = Ok then
+          Sound (Seg, Trades'Length)
+          and then Replay_Is_Exact (Trades, T_Start, T_End, Seg)
         else Seg = Segment'(others => 0));
 
    --  ---- Whole history ----
@@ -339,7 +506,12 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
    --  sales) above Max_Aggregate; Bad_Order: see Ordered;
    --  Insufficient_Holdings: a sell exceeds the units held. Purchased and
    --  Consumed cover all history up to T_End, and
-   --  Purchased = Consumed + Basis_At_End (basis conservation).
+   --  Purchased = Consumed + Basis_At_End (basis conservation). The money is
+   --  exact (audit E1): Purchased is the cost of every buy up to T_End, and
+   --  Realized_Gain = Sales - (Consumed - Consumed_At_Start), where Sales is
+   --  the value of the sells in (T_Start, T_End] and Consumed_At_Start (the
+   --  basis consumed up to T_Start) is the cost of the buys up to T_Start
+   --  minus Basis_At_Start.
    procedure Compute
      (Method  : Int32;
       Trades  : Wire.Trade_Array;
@@ -350,10 +522,23 @@ package Ledger_Core.Cost_Basis with SPARK_Mode is
    with
      Post =>
        (if Result = Ok then
-          Report.Purchased = Report.Consumed + Report.Basis_At_End
+          Valid_Trades (Trades) and then Sane (Trades)
+          and then Report.Purchased = Report.Consumed + Report.Basis_At_End
           and then Report.Basis_At_End >= 0
           and then Report.Basis_At_Start >= 0
           and then Report.Purchased in 0 .. Max_Aggregate
+          and then Big (Report.Purchased) =
+                     Buys_Until
+                       (Trades, Trades'First, Trades'Last + 1, T_End)
+          and then Big (Report.Realized_Gain) =
+                     (Sells_Until
+                        (Trades, Trades'First, Trades'Last + 1, T_End)
+                      - Sells_Until
+                          (Trades, Trades'First, Trades'Last + 1, T_Start))
+                     - (Big (Report.Consumed)
+                        - (Buys_Until
+                             (Trades, Trades'First, Trades'Last + 1, T_Start)
+                           - Big (Report.Basis_At_Start)))
         else Report = (others => 0));
 
 end Ledger_Core.Cost_Basis;

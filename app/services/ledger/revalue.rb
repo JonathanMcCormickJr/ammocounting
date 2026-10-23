@@ -6,26 +6,34 @@ module Ledger
   class Revalue
     # prices: { caliber_id => centicents }, default the latest ticks.
     # Returns the LedgerTransaction, or nil when nothing needed posting.
-    def self.call(user, prices: Ledger.latest_prices, at: nil)
+    def self.call(user, prices: nil, at: nil)
       user.with_lock do
+        prices ||= Ledger.latest_prices # read inside the lock: an older tick can never overwrite a newer revaluation
         values = Balances.quantities(user).map { |caliber_id, qty| LedgerEngine.market_value(qty, prices.fetch(caliber_id)) }
         revaluation = LedgerEngine.revalue(values, Balances.sheet(user).holdings)
         next if revaluation.postings.empty?
 
-        Poster.call(user, kind: :revalue, at: at || Ledger.now, description: "Revalue holdings", postings: revaluation.postings)
+        Poster.call(user, kind: :revalue, at: at || Ledger.now_for(user), description: "Revalue holdings", postings: revaluation.postings)
       end
     end
 
-    # Revalues every user who holds rounds, at the latest prices. One user's
-    # failure is logged and does not stop the others. Returns the transactions posted.
+    # Revalues every user who holds rounds, at the latest prices. One user's failure
+    # is logged (Rails.logger.error) and does not stop the others; once all have been
+    # tried, any failure raises Ledger::RevalueFailed (carrying the failures and the
+    # transactions posted for the rest), so a failed revaluation is never silent.
+    # Returns the transactions posted when every user succeeded.
     def self.all_holders(logger: Rails.logger, at: nil)
-      prices = Ledger.latest_prices
-      User.where(id: Trade.holder_user_ids).filter_map do |user|
-        call(user, prices: prices, at: at)
+      failures = {}
+      posted = User.where(id: Trade.holder_user_ids).filter_map do |user|
+        call(user, at: at)
       rescue StandardError => e
         logger.error("Ledger::Revalue failed for user #{user.id}: #{e.class}: #{e.message}")
+        failures[user.id] = e
         nil
       end
+      raise RevalueFailed.new(failures, posted) if failures.any?
+
+      posted
     end
   end
 end

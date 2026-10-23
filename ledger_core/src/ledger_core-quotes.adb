@@ -36,10 +36,14 @@ package body Ledger_Core.Quotes with SPARK_Mode is
       elsif Spread_Bps not in Rate or else Fee_Bps not in Rate then
          Result := Out_Of_Range;
          return;
+      elsif Value = 0 then
+         Result := Bad_Argument;
+         return;
       end if;
 
       declare
-         Spread : constant Int64 := Int64 (Spread_Of (Value, Spread_Bps));
+         Spread : constant Int64 :=
+           Int64 (Spread_Charged (Value, Spread_Bps, Fee_Bps));
          Fee    : constant Int64 := Int64 (Fee_Of (Value, Fee_Bps));
          Total  : constant Int64 := Value + Spread + Fee;
       begin
@@ -79,13 +83,17 @@ package body Ledger_Core.Quotes with SPARK_Mode is
       elsif Qty_Held < 0 then
          Result := Out_Of_Range;
          return;
+      elsif Value = 0 then
+         Result := Bad_Argument;
+         return;
       elsif Qty > Qty_Held then
          Result := Insufficient_Holdings;
          return;
       end if;
 
       declare
-         Spread : constant Int64 := Int64 (Spread_Of (Value, Spread_Bps));
+         Spread : constant Int64 :=
+           Int64 (Spread_Charged (Value, Spread_Bps, Fee_Bps));
          Fee    : constant Int64 := Int64 (Fee_Of (Value, Fee_Bps));
          Costs  : constant Int64 := Spread + Fee;
       begin

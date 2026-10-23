@@ -69,6 +69,47 @@ package body Ledger_Core.C_API with SPARK_Mode => Off is
       when others => return Failed;
    end Apply_Transaction;
 
+   function Apply_Kind
+     (Kind : Int32;
+      Set  : System.Address;
+      Prev : System.Address;
+      Next : System.Address) return Int32
+   is
+      Result : Status;
+   begin
+      if Set = Null_Pointer or else Prev = Null_Pointer
+        or else Next = Null_Pointer
+      then
+         return Bad;
+      end if;
+      declare
+         In_Set   : Wire.Posting_Set with Import, Address => Set;
+         In_Prev  : Wire.Totals with Import, Address => Prev;
+         Out_Next : Wire.Totals with Import, Address => Next;
+      begin
+         Running.Apply_Typed (Kind, In_Set, In_Prev, Out_Next, Result);
+      end;
+      return Code (Result);
+   exception
+      when others => return Failed;
+   end Apply_Kind;
+
+   function Apply_Deposit
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32 is (Apply_Kind (0, Set, Prev, Next));
+
+   function Apply_Buy
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32 is (Apply_Kind (1, Set, Prev, Next));
+
+   function Apply_Sell
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32 is (Apply_Kind (2, Set, Prev, Next));
+
+   function Apply_Revalue
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32 is (Apply_Kind (3, Set, Prev, Next));
+
    function Diff_Totals
      (To : System.Address; From : System.Address; Diff : System.Address)
       return Int32
@@ -472,6 +513,33 @@ package body Ledger_Core.C_API with SPARK_Mode => Off is
    exception
       when others => return Failed;
    end Period_Report;
+
+   function Period_Report_Checked
+     (Opening : System.Address;
+      Closing : System.Address;
+      Basis   : System.Address;
+      Report  : System.Address) return Int32
+   is
+      Result : Status;
+   begin
+      if Opening = Null_Pointer or else Closing = Null_Pointer
+        or else Basis = Null_Pointer or else Report = Null_Pointer
+      then
+         return Bad;
+      end if;
+      declare
+         In_Opening : Wire.Totals with Import, Address => Opening;
+         In_Closing : Wire.Totals with Import, Address => Closing;
+         In_Basis   : Wire.Basis_Report with Import, Address => Basis;
+         Out_Report : Wire.Period_Report with Import, Address => Report;
+      begin
+         Reports.Period_Checked
+           (In_Opening, In_Closing, In_Basis, Out_Report, Result);
+      end;
+      return Code (Result);
+   exception
+      when others => return Failed;
+   end Period_Report_Checked;
 
    --  ---- Display ----
 

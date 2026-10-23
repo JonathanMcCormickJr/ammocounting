@@ -56,6 +56,11 @@ procedure Test_C_API is
    Run_Prev    : aliased Wire.Totals := Zero_Totals;
    Run_Next    : aliased Wire.Totals;
    Run_Diff    : aliased Wire.Totals;
+   Typed_Prev  : aliased Wire.Totals;
+   Alias       : aliased Wire.Totals;
+   Postings_Set : aliased Wire.Posting_Set :=
+     (Count => 2, Reserved => 0,
+      Items => (1 => (1, 0, 100), 2 => (3, 1, 100), others => (0, 0, 0)));
    Chain       : aliased Wire.Totals_Array (1 .. 2);
    Sums        : aliased Wire.Account_Totals;
    Set         : aliased Wire.Posting_Set;
@@ -79,8 +84,8 @@ procedure Test_C_API is
       Check.Eq (Name, Got, Int32 (Status'Enum_Rep (Want)));
    end Code;
 begin
-   Check.Eq ("version", Ledger_Core.Engine_Version, 200);
-   Check.Eq ("c version", C_API.Engine_Version, 200);
+   Check.Eq ("version", Ledger_Core.Engine_Version, 300);
+   Check.Eq ("c version", C_API.Engine_Version, 300);
 
    --  validate_transaction
    Code ("validate ok", Validate_Transaction (2, Postings'Address), Ok);
@@ -109,6 +114,13 @@ begin
          Insufficient_Cash);
    Code ("buy null", Quote_Buy (1000, 2500, 50, 100, 1, Null_Ptr),
          Bad_Argument);
+   Code ("buy of zero value is a bad argument (E5)",
+         Quote_Buy (0, 2500, 50, 100, 30_000, Buy'Address), Bad_Argument);
+   Check.Eq ("buy of zero value zeroes", Buy.Total_Cash_Out, 0);
+   Code ("buy at zero rates costs one cent (E3)",
+         Quote_Buy (1, 149, 0, 0, 30_000, Buy'Address), Ok);
+   Check.Eq ("minimum cost", Buy.Costs, 1);
+   Check.Eq ("minimum cost value", Buy.Value, 1);
 
    --  quote_sell
    Code ("sell", Quote_Sell (1000, 1000, 2500, 50, 100, Sell'Address), Ok);
@@ -117,6 +129,11 @@ begin
          Quote_Sell (1000, 10, 2500, 50, 100, Sell'Address),
          Insufficient_Holdings);
    Code ("sell null", Quote_Sell (1, 1, 1, 0, 0, Null_Ptr), Bad_Argument);
+   Code ("sell of zero value is a bad argument (E5)",
+         Quote_Sell (1, 1, 49, 50, 100, Sell'Address), Bad_Argument);
+   Code ("sell at zero rates costs one cent (E3)",
+         Quote_Sell (1000, 1000, 2500, 0, 0, Sell'Address), Ok);
+   Check.Eq ("sell minimum cost", Sell.Costs, 1);
 
    --  cost_basis
    Code ("basis average",
@@ -347,6 +364,151 @@ begin
    Code ("period null report",
          Period_Report (Zero_Totals'Address, Run_Prev'Address, 0, Null_Ptr),
          Bad_Argument);
+
+   --  Typed entry points (audit E4)
+   Code ("typed deposit", Apply_Deposit (Set'Address, Zero_Totals'Address,
+                                         Run_Next'Address), Ok);
+   Check.Eq ("typed deposit cash", Run_Next (0, 1).Debits, 177_600);
+   Code ("typed: deposit is not a buy",
+         Apply_Buy (Set'Address, Run_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Check.Holds ("typed refusal zeroes", Run_Next = Zero_Totals);
+   Code ("typed: deposit is not a sell",
+         Apply_Sell (Set'Address, Run_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed: deposit is not a revalue",
+         Apply_Revalue (Set'Address, Run_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed buy", Build_Buy (Buy_Quote'Address, Set'Address), Ok);
+   Code ("typed: buy is not a deposit",
+         Apply_Deposit (Set'Address, Run_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed buy ok",
+         Apply_Buy (Set'Address, Run_Prev'Address, Typed_Prev'Address), Ok);
+   Check.Eq ("typed buy holdings", Typed_Prev (1, 2).Debits, 25_000);
+   Code ("typed sell",
+         Build_Sell (Sell_Quote'Address, Set'Address), Ok);
+   Code ("typed: sell is not a buy",
+         Apply_Buy (Set'Address, Typed_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed sell ok",
+         Apply_Sell (Set'Address, Typed_Prev'Address, Run_Next'Address), Ok);
+   Check.Eq ("typed sell cash", Run_Next (2, 1).Debits, 24_625);
+   Code ("typed revalue build",
+         Revalue (2, Values'Address, 250, Info'Address, Set'Address), Ok);
+   Code ("typed revalue ok",
+         Apply_Revalue (Set'Address, Typed_Prev'Address, Run_Next'Address),
+         Ok);
+   Check.Eq ("typed revalue gain", Run_Next (3, 4).Credits, 50);
+   Code ("typed: revalue is not a sell",
+         Apply_Sell (Set'Address, Typed_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed null set",
+         Apply_Deposit (Null_Ptr, Run_Prev'Address, Run_Next'Address),
+         Bad_Argument);
+   Code ("typed null prev",
+         Apply_Buy (Set'Address, Null_Ptr, Run_Next'Address), Bad_Argument);
+   Code ("typed null next",
+         Apply_Sell (Set'Address, Run_Prev'Address, Null_Ptr), Bad_Argument);
+   Code ("typed revalue null next",
+         Apply_Revalue (Set'Address, Run_Prev'Address, Null_Ptr),
+         Bad_Argument);
+   Code ("typed deposit bad pointer",
+         Apply_Deposit (Bad_Pointer, Run_Prev'Address, Run_Next'Address),
+         Internal_Error);
+   Code ("typed buy bad pointer",
+         Apply_Buy (Bad_Pointer, Run_Prev'Address, Run_Next'Address),
+         Internal_Error);
+   Code ("typed sell bad pointer",
+         Apply_Sell (Bad_Pointer, Run_Prev'Address, Run_Next'Address),
+         Internal_Error);
+   Code ("typed revalue bad pointer",
+         Apply_Revalue (Bad_Pointer, Run_Prev'Address, Run_Next'Address),
+         Internal_Error);
+
+   --  Output overlapping an input must not bypass a check (audit E8).
+   Alias := Zero_Totals;
+   Alias (0, 1).Debits := 5;  --  unbalanced previous totals
+   Code ("apply with Next = Prev still rejects unbalanced Prev",
+         Apply_Transaction (0, Postings_Set'Address, Alias'Address,
+                            Alias'Address), Unbalanced);
+   Check.Holds ("apply aliased error zeroes the output",
+                Alias = Zero_Totals);
+   Alias := Run_Prev;
+   Code ("apply with Next = Prev",
+         Apply_Transaction (0, Postings_Set'Address, Alias'Address,
+                            Alias'Address), Ok);
+   Check.Eq ("apply aliased cash", Alias (0, 1).Debits, 177_700);
+   Alias := Zero_Totals;
+   Alias (0, 1).Debits := 5;
+   Code ("typed apply with Next = Prev rejects unbalanced Prev",
+         Apply_Deposit (Postings_Set'Address, Alias'Address,
+                        Alias'Address), Unbalanced);
+   Alias := Run_Prev;
+   Code ("diff with Diff = To",
+         Diff_Totals (Alias'Address, Zero_Totals'Address, Alias'Address),
+         Ok);
+   Check.Holds ("diff aliased value", Alias = Run_Prev);
+   Alias := Zero_Totals;
+   Alias (0, 1).Debits := 5;
+   Code ("diff with Diff = To still rejects unbalanced To",
+         Diff_Totals (Alias'Address, Zero_Totals'Address, Alias'Address),
+         Unbalanced);
+   Check.Holds ("diff aliased error zeroes the output",
+                Alias = Zero_Totals);
+   Alias := Run_Prev;
+   Code ("diff with Diff = From (From > To)",
+         Diff_Totals (Zero_Totals'Address, Alias'Address, Alias'Address),
+         Bad_Order);
+   Check.Holds ("diff aliased bad order zeroes", Alias = Zero_Totals);
+   Alias := Run_Prev;
+   Code ("diff of a value with itself, all three aliased",
+         Diff_Totals (Alias'Address, Alias'Address, Alias'Address), Ok);
+   Check.Holds ("diff x - x = 0", Alias = Zero_Totals);
+
+   --  Period_Report_Checked
+   Run_Next := Zero_Totals;
+   Run_Next (0, 1).Debits := 177_600;
+   Run_Next (0, 3).Credits := 177_600;
+   Run_Next (1, 2).Debits := 25_000;
+   Run_Next (1, 5).Debits := 375;
+   Run_Next (1, 1).Credits := 25_375;
+   Run_Next (3, 2).Debits := 1_000;
+   Run_Next (3, 4).Credits := 1_000;
+   Basis := (0, 0, 25_000, 25_000, 0);
+   Code ("checked period",
+         Period_Report_Checked (Zero_Totals'Address, Run_Next'Address,
+                                Basis'Address, Period'Address), Ok);
+   Check.Eq ("checked period unrealized", Period.Income.Unrealized_Gain,
+             1_000);
+   Basis := (0, 0, 24_000, 24_000, 0);
+   Code ("checked period disagrees with the ledger",
+         Period_Report_Checked (Zero_Totals'Address, Run_Next'Address,
+                                Basis'Address, Period'Address),
+         Not_Reconciled);
+   Check.Eq ("checked period error zeroes", Period.Closing.Cash, 0);
+   Basis := (0, -1, 0, 0, 0);
+   Code ("checked period basis out of range",
+         Period_Report_Checked (Zero_Totals'Address, Run_Next'Address,
+                                Basis'Address, Period'Address),
+         Out_Of_Range);
+   Code ("checked period null opening",
+         Period_Report_Checked (Null_Ptr, Run_Next'Address, Basis'Address,
+                                Period'Address), Bad_Argument);
+   Code ("checked period null closing",
+         Period_Report_Checked (Zero_Totals'Address, Null_Ptr,
+                                Basis'Address, Period'Address), Bad_Argument);
+   Code ("checked period null basis",
+         Period_Report_Checked (Zero_Totals'Address, Run_Next'Address,
+                                Null_Ptr, Period'Address), Bad_Argument);
+   Code ("checked period null report",
+         Period_Report_Checked (Zero_Totals'Address, Run_Next'Address,
+                                Basis'Address, Null_Ptr), Bad_Argument);
+   Basis := (0, 0, 25_000, 25_000, 0);
+   Code ("checked period bad pointer",
+         Period_Report_Checked (Bad_Pointer, Run_Next'Address,
+                                Basis'Address, Period'Address),
+         Internal_Error);
 
    --  holdings
    Code ("trade quantity", Apply_Trade_Quantity (5, 0, 3, Held'Address), Ok);

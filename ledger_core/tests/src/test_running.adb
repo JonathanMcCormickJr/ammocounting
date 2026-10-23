@@ -257,4 +257,136 @@ begin
       Audit_Chain (Wire.Totals_Array'(1 => Bad), Result);
       Check.Is_Status ("chain unsound row", Result, Negative_Balance);
    end;
+
+   --  Apply_Typed (audit E4): the kind must match the posting shape.
+   declare
+      procedure Typed (Name : String; Kind : Int32; Set : Wire.Posting_Set;
+                       Prev : Wire.Totals; Want : Status) is
+      begin
+         Apply_Typed (Kind, Set, Prev, Next, Result);
+         Check.Is_Status (Name, Result, Want);
+         if Want = Ok then
+            Apply_Transaction (Kind, Set, Prev, Diff, Result);
+            Check.Holds (Name & " equals the general entry point",
+                         Next = Diff);
+         else
+            Check.Holds (Name & " zeroed", Next = Zero);
+         end if;
+      end Typed;
+
+      --  A one-posting-pair set built by hand.
+      function Pair (Dr, Cr : Int32; Amount : Int64) return Wire.Posting_Set
+      is
+         S : Wire.Posting_Set := Transactions.Empty_Set;
+      begin
+         S.Count := 2;
+         S.Items (1) := (Dr, 0, Amount);
+         S.Items (2) := (Cr, 1, Amount);
+         return S;
+      end Pair;
+
+      Three : Wire.Posting_Set := Transactions.Empty_Set;
+   begin
+      Typed ("typed deposit", 0, Deposit_Set, Zero, Ok);
+      Typed ("typed buy", 1, Buy_Set, After_Deposit, Ok);
+      Typed ("typed sell", 2, Sell_Set, After_Gain, Ok);
+      Typed ("typed revalue gain", 3, Gain_Set, After_Buy, Ok);
+      Typed ("typed revalue loss", 3, Loss_Set, After_Buy, Ok);
+      Cell ("typed loss holdings", Next, 3, 2, 0, 1_000);
+
+      --  Wrong kind for the shape.
+      Typed ("buy as deposit", 0, Buy_Set, After_Deposit, Bad_Argument);
+      Typed ("deposit as buy", 1, Deposit_Set, After_Deposit, Bad_Argument);
+      Typed ("sell as buy", 1, Sell_Set, After_Gain, Bad_Argument);
+      Typed ("buy as sell", 2, Buy_Set, After_Deposit, Bad_Argument);
+      Typed ("deposit as revalue", 3, Deposit_Set, Zero, Bad_Argument);
+      Typed ("revalue as deposit", 0, Gain_Set, After_Buy, Bad_Argument);
+      Typed ("revalue as sell", 2, Gain_Set, After_Buy, Bad_Argument);
+      Typed ("sell as revalue", 3, Sell_Set, After_Gain, Bad_Argument);
+      Typed ("kind 4", 4, Deposit_Set, Zero, Bad_Argument);
+      Typed ("kind -1", -1, Deposit_Set, Zero, Bad_Argument);
+
+      --  The general entry point accepts a mislabelled set; the typed
+      --  one refuses it (the audit's gap).
+      Apply ("general: gain posted as a deposit", 0, Gain_Set, After_Buy, Ok);
+
+      --  Set validity is reported first, with the general statuses.
+      Typed ("typed empty set", 0, Transactions.Empty_Set, Zero,
+             Bad_Argument);
+      Typed ("typed pair deposit", 0, Pair (1, 3, 5), Zero, Ok);
+      Three := Pair (1, 3, 5);
+      Three.Items (2).Amount := 4;
+      Typed ("typed unbalanced set", 0, Three, Zero, Unbalanced);
+      Three := Pair (1, 3, Max_Amount + 1);
+      Typed ("typed amount over max", 0, Three, Zero, Out_Of_Range);
+
+      --  Other shapes that must be refused, kind by kind.
+      Typed ("deposit into holdings", 0, Pair (2, 3, 5), Zero, Bad_Argument);
+      Typed ("deposit from costs", 0, Pair (1, 5, 5), Zero, Bad_Argument);
+      Typed ("buy needs cash credit", 1, Pair (2, 3, 5), After_Deposit,
+             Bad_Argument);
+      Typed ("buy with only costs debit is a shape-valid buy", 1,
+             Pair (5, 1, 5), After_Deposit, Ok);
+      Typed ("buy paying a gain", 1, Pair (4, 1, 5), After_Deposit,
+             Bad_Argument);
+      Typed ("sell crediting cash", 2, Pair (2, 1, 5), After_Gain,
+             Bad_Argument);
+      Typed ("sell needs a holdings credit", 2, Pair (1, 3, 5), After_Gain,
+             Bad_Argument);
+      Typed ("sell with no costs", 2, Pair (1, 2, 5), After_Gain, Ok);
+      Typed ("revalue touching cash", 3, Pair (1, 4, 5), After_Gain,
+             Bad_Argument);
+      Typed ("revalue touching costs", 3, Pair (5, 2, 5), After_Gain,
+             Bad_Argument);
+      Typed ("revalue touching capital", 3, Pair (2, 3, 5), After_Gain,
+             Bad_Argument);
+
+      --  A revalue may not post both directions at once.
+      Three.Count := 4;
+      Three.Items := (1 => (2, 0, 5), 2 => (4, 1, 5),
+                      3 => (4, 0, 5), 4 => (2, 1, 5), others => (0, 0, 0));
+      Typed ("revalue both directions", 3, Three, After_Gain, Bad_Argument);
+
+      --  The remaining checks are those of Apply_Transaction.
+      declare
+         Bad : Wire.Totals := Zero;
+      begin
+         Bad (0, 1).Debits := Max_Cell + 1;
+         Typed ("typed prev cell over max", 0, Deposit_Set, Bad,
+                Out_Of_Range);
+         Bad := Zero;
+         Bad (0, 1).Debits := 5;
+         Typed ("typed prev unbalanced", 0, Deposit_Set, Bad, Unbalanced);
+      end;
+      Typed ("typed buy with no cash", 1, Buy_Set, Zero, Negative_Balance);
+
+      --  Has_Shape directly.
+      Check.Holds ("shape of deposit",
+                   Has_Shape (0, Transactions.Postings_Of (Deposit_Set)));
+      Check.Holds ("shape of buy",
+                   Has_Shape (1, Transactions.Postings_Of (Buy_Set)));
+      Check.Holds ("shape of sell",
+                   Has_Shape (2, Transactions.Postings_Of (Sell_Set)));
+      Check.Holds ("shape of revalue gain",
+                   Has_Shape (3, Transactions.Postings_Of (Gain_Set)));
+      Check.Holds ("shape of revalue loss",
+                   Has_Shape (3, Transactions.Postings_Of (Loss_Set)));
+      Check.Holds ("deposit is not a buy",
+                   not Has_Shape (1, Transactions.Postings_Of (Deposit_Set)));
+      Check.Holds ("buy is not a sell",
+                   not Has_Shape (2, Transactions.Postings_Of (Buy_Set)));
+      Check.Holds ("sell is not a revalue",
+                   not Has_Shape (3, Transactions.Postings_Of (Sell_Set)));
+      Check.Holds ("revalue is not a deposit",
+                   not Has_Shape (0, Transactions.Postings_Of (Gain_Set)));
+
+      --  Adds_Exactly directly.
+      Check.Holds ("adds exactly: buy",
+                   Adds_Exactly (1, Buy_Set, After_Deposit, After_Buy));
+      Check.Holds ("adds exactly: wrong kind",
+                   not Adds_Exactly (2, Buy_Set, After_Deposit, After_Buy));
+      Check.Holds ("adds exactly: nothing added",
+                   not Adds_Exactly (1, Buy_Set, After_Deposit,
+                                     After_Deposit));
+   end;
 end Test_Running;

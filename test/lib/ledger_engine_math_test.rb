@@ -121,9 +121,94 @@ class LedgerEngineMathTest < ActiveSupport::TestCase
     assert_equal [ 8, 0, 0, 0, 0, 8 ], E.apply_transaction(:deposit, sixteen, E::ZERO_TOTALS).first(6)
   end
 
+  # --- typed applies (ABI.md: apply_deposit / apply_buy / apply_sell / apply_revalue) ---
+
+  SELL = [ [ 1, 0, 24_625 ], [ 5, 0, 375 ], [ 2, 1, 25_000 ] ].freeze
+  REVALUE_GAIN = [ [ 2, 0, 500 ], [ 4, 1, 500 ] ].freeze
+  REVALUE_LOSS = [ [ 4, 0, 500 ], [ 2, 1, 500 ] ].freeze
+
+  test "each typed apply adds its kind exactly like apply_transaction" do
+    assert_equal E.apply_transaction(:deposit, DEPOSIT, E::ZERO_TOTALS), E.apply_deposit(DEPOSIT, E::ZERO_TOTALS)
+    assert_equal AFTER_BUY, E.apply_buy(BUY, AFTER_DEPOSIT)
+    assert_equal E.apply_transaction(:sell, SELL, AFTER_BUY), E.apply_sell(SELL, AFTER_BUY)
+    assert_equal E.apply_transaction(:revalue, REVALUE_GAIN, AFTER_BUY), E.apply_revalue(REVALUE_GAIN, AFTER_BUY)
+    assert_equal E.apply_transaction(:revalue, REVALUE_LOSS, AFTER_BUY), E.apply_revalue(REVALUE_LOSS, AFTER_BUY)
+  end
+
+  test "typed applies accept what the engine builders produce" do
+    assert_equal AFTER_DEPOSIT, E.apply_deposit(E.build_deposit(177_600), E::ZERO_TOTALS)
+    quote = E.quote_sell(qty: 1000, qty_held: 1000, price: 2500, spread_bps: 50, fee_bps: 100)
+    assert_equal SELL, E.build_sell(quote)
+  end
+
+  test "a typed apply refuses postings of another kind's shape with a plain Error (status 1)" do
+    {
+      apply_deposit: BUY, apply_buy: DEPOSIT, apply_sell: BUY, apply_revalue: DEPOSIT
+    }.each do |method, wrong|
+      error = assert_raises(E::Error) { E.public_send(method, wrong, AFTER_BUY) }
+      assert_equal :bad_argument, error.status, method
+      assert_equal method, error.operation
+      assert_not_kind_of E::Refusal, error
+    end
+    assert_equal :bad_argument, status_of { E.apply_revalue(REVALUE_GAIN + REVALUE_LOSS, AFTER_BUY) }
+  end
+
+  test "typed applies keep every apply_transaction check and the strict coercion" do
+    assert_equal :unbalanced, status_of { E.apply_deposit([ [ 1, 0, 5 ], [ 3, 1, 4 ] ], E::ZERO_TOTALS) }
+    assert_equal :negative_balance, status_of { E.apply_buy(BUY, E::ZERO_TOTALS) }
+    assert_equal :invalid_argument, status_of { E.apply_deposit([ [ 1, 0, 1.0 ], [ 3, 1, 1 ] ], E::ZERO_TOTALS) }
+    assert_raises(ArgumentError) { E.apply_buy(BUY, [ 0 ] * 39) }
+    assert_equal :bad_argument, status_of { E.apply_deposit(Array.new(17) { [ 1, 0, 1 ] }, E::ZERO_TOTALS) }
+  end
+
+  test "typed applies are bound with the signature the ABI documents" do
+    %i[apply_deposit apply_buy apply_sell apply_revalue].each do |name|
+      assert_equal [ %i[pointer pointer pointer], :int32 ], E::Native::SIGNATURES.fetch(name)
+    end
+    assert_equal [ %i[pointer pointer pointer pointer], :int32 ], E::Native::SIGNATURES.fetch(:period_report_checked)
+  end
+
+  # --- period_report_checked ---
+
+  # cost_basis of the one buy of 1000 rounds worth 25_000 (AFTER_DEPOSIT -> AFTER_BUY).
+  BUY_BASIS = E::BasisReport.new(realized_gain: 0, basis_at_start: 0, basis_at_end: 25_000, purchased: 25_000, consumed: 0)
+
+  test "period_report_checked equals period_report when the trades tell the ledger's story" do
+    checked = E.period_report_checked(AFTER_DEPOSIT, AFTER_BUY, BUY_BASIS)
+    assert_equal E.period_report(AFTER_DEPOSIT, AFTER_BUY, 0), checked
+    assert_equal(-375, checked.income.net_income)
+  end
+
+  test "period_report_checked uses the basis report's realized gain" do
+    after_sell = E.apply_sell(SELL, AFTER_BUY)
+    basis = E::BasisReport.new(realized_gain: 0, basis_at_start: 0, basis_at_end: 0, purchased: 25_000, consumed: 25_000)
+    report = E.period_report_checked(AFTER_DEPOSIT, after_sell, basis)
+    assert_equal 0, report.income.realized_gain
+    assert_equal 0, report.income.unrealized_gain
+  end
+
+  test "period_report_checked refuses a ledger the trades disagree with as a loud Error (status 9)" do
+    {
+      "basis does not match the purchases" => BUY_BASIS.with(basis_at_end: 24_000),
+      "realized gain not in the ledger" => BUY_BASIS.with(realized_gain: 10, consumed: 0)
+    }.each do |what, basis|
+      error = assert_raises(E::Error, what) { E.period_report_checked(AFTER_DEPOSIT, AFTER_BUY, basis) }
+      assert_equal :not_reconciled, error.status, what
+      assert_equal :period_report_checked, error.operation
+      assert_not_kind_of E::Refusal, error
+    end
+  end
+
+  test "period_report_checked error statuses and strict inputs" do
+    assert_equal :bad_order, status_of { E.period_report_checked(AFTER_BUY, AFTER_DEPOSIT, BUY_BASIS) }
+    assert_equal :out_of_range, status_of { E.period_report_checked(AFTER_DEPOSIT, AFTER_BUY, BUY_BASIS.with(purchased: 10**17 + 1)) }
+    assert_equal :invalid_argument, status_of { E.period_report_checked(AFTER_DEPOSIT, AFTER_BUY, BUY_BASIS.with(consumed: 0.0)) }
+    assert_raises(ArgumentError) { E.period_report_checked([ 0 ] * 39, AFTER_BUY, BUY_BASIS) }
+  end
+
   test "ints beyond int64 never reach the engine" do
-    assert_raises(RangeError) { E.sum([ 2**70 ]) }
-    assert_raises(RangeError) { E.apply_transaction(:deposit, DEPOSIT, [ 2**70 ] + [ 0 ] * 39) }
+    assert_raises(LedgerEngine::Error) { E.sum([ 2**70 ]) }
+    assert_raises(LedgerEngine::Error) { E.apply_transaction(:deposit, DEPOSIT, [ 2**70 ] + [ 0 ] * 39) }
   end
 
   test "diff_totals is closing minus opening, cell by cell" do

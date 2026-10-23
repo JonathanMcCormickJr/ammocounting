@@ -24,6 +24,17 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_select "#market button[name='trade[side]'][value='sell']", 2
   end
 
+  test "every trade form carries its own freshly issued nonce" do
+    sign_in_as(users(:one))
+    get root_path
+    first = css_select("#market input[name='trade[nonce]']").map { _1["value"] }
+    assert_equal 2, first.size
+    assert_equal first.uniq, first
+    first.each { assert_match Ledger::NONCE_FORMAT, _1 }
+    get root_path
+    assert_empty first & css_select("#market input[name='trade[nonce]']").map { _1["value"] }, "a reload issues new nonces"
+  end
+
   test "an empty portfolio says so" do
     sign_in_as(users(:one))
     get root_path

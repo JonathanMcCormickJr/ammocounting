@@ -107,6 +107,66 @@ class PriceRollupTest < ActiveSupport::TestCase
     assert_equal 3, buckets("weekly").sum(:tick_count)
   end
 
+  test "a failure while storing leaves no partial buckets for that caliber (one transaction per caliber)" do
+    tick(Time.utc(2026, 3, 10, 10), 100)
+    calls = 0
+    real = PriceBucket.method(:upsert_all)
+    failing = ->(rows, **options) { (calls += 1) == 3 ? raise("disk full") : real.call(rows, **options) } # hourly, daily ok; weekly fails
+    with_singleton(PriceBucket, :upsert_all, failing) do
+      assert_raises(RuntimeError) { PriceRollup.call(now: @now) }
+    end
+    assert_equal 3, calls
+    assert_equal 0, PriceBucket.count, "hourly and daily were rolled back with the failed weekly"
+    PriceRollup.call(now: @now)
+    assert_equal [ 1, 1, 1 ], %w[hourly daily weekly].map { buckets(_1).size }, "the next run recovers"
+  end
+
+  test "one caliber failing does not undo another caliber that already finished" do
+    tick(Time.utc(2026, 3, 10, 10), 100)
+    calibers(:twenty_two).price_ticks.create!(as_of: Time.utc(2026, 3, 10, 10), price_centicents: 900)
+    real = PriceBucket.method(:upsert_all)
+    twenty_two_id = calibers(:twenty_two).id
+    failing = ->(rows, **options) { rows.first[:caliber_id] == twenty_two_id ? raise("boom") : real.call(rows, **options) }
+    with_singleton(PriceBucket, :upsert_all, failing) do
+      assert_raises(RuntimeError) { PriceRollup.call(now: @now) }
+    end
+    assert_equal 3, @caliber.price_buckets.count, "nine_mm sorts first and was stored completely"
+    assert_equal 0, calibers(:twenty_two).price_buckets.count
+  end
+
+  test "a late tick inside an already rolled hour is picked up and the larger buckets re-derived" do
+    tick(Time.utc(2026, 3, 10, 10, 0), 100)
+    tick(Time.utc(2026, 3, 11, 10, 0), 200) # later hour: resume point moves past 03-10 10:00
+    PriceRollup.call(now: @now)
+    tick(Time.utc(2026, 3, 10, 10, 30), 500) # arrives late: older than the resume point
+    PriceRollup.call(now: @now)
+
+    first = buckets("hourly").first
+    assert_equal [ 100, 500, 100, 500, 2 ], [ first.open_centicents, first.high_centicents, first.low_centicents, first.close_centicents, first.tick_count ]
+    day = buckets("daily").first
+    assert_equal [ 2, 500 ], [ day.tick_count, day.close_centicents ]
+    assert_equal 3, buckets("weekly").first.tick_count
+  end
+
+  test "a late tick for an hour that never had a bucket creates it" do
+    tick(Time.utc(2026, 3, 11, 10, 0), 200)
+    PriceRollup.call(now: @now)
+    tick(Time.utc(2026, 3, 9, 3, 15), 70) # earlier week, arrives late
+    PriceRollup.call(now: @now)
+    assert_equal [ Time.utc(2026, 3, 9, 3), Time.utc(2026, 3, 11, 10) ], buckets("hourly").map(&:bucket_start)
+    assert_equal [ Time.utc(2026, 3, 9), Time.utc(2026, 3, 9) ], buckets("weekly").map(&:bucket_start).then { |starts| [ starts.first, starts.last ] }
+    assert_equal [ 70, 200 ], buckets("weekly").first.then { [ _1.open_centicents, _1.close_centicents ] }
+  end
+
+  test "hourly buckets record the highest tick id they were built from" do
+    first = tick(Time.utc(2026, 3, 10, 10, 0), 100)
+    last = tick(Time.utc(2026, 3, 10, 10, 5), 120)
+    PriceRollup.call(now: @now)
+    assert_equal last.id, buckets("hourly").first.last_tick_id
+    assert_operator last.id, :>, first.id
+    assert_nil buckets("daily").first.last_tick_id
+  end
+
   test "rolls each caliber separately" do
     tick(Time.utc(2026, 3, 10, 10), 100)
     calibers(:twenty_two).price_ticks.create!(as_of: Time.utc(2026, 3, 10, 10), price_centicents: 900)

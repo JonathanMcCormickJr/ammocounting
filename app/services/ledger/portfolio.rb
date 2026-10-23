@@ -15,9 +15,14 @@ module Ledger
     attr_reader :user, :sheet, :positions
 
     # Raises Ledger::IntegrityError (loudly) if the engine's balance sheet check fails.
+    # Reads inside one (deferred, read) transaction: the balance sheet, holdings
+    # and trades all come from one database snapshot, never a mix of before and
+    # after a concurrent trade.
     def self.for(user, now: Time.current)
-      sheet = balance_sheet(user, now)
-      new(user, sheet, positions_for(user, now))
+      ApplicationRecord.transaction(joinable: false) do
+        sheet = balance_sheet(user, now)
+        new(user, sheet, positions_for(user, now))
+      end
     end
 
     def self.balance_sheet(user, now)

@@ -29,6 +29,30 @@ package Ledger_Core.C_API with SPARK_Mode => Off is
      Export, Convention => C,
      External_Name => "ledger_core_apply_transaction";
 
+   --  Typed variants of Apply_Transaction: the kind is fixed by the entry
+   --  point and the postings must have that kind's shape (else status 1).
+   function Apply_Deposit
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32
+   with
+     Export, Convention => C, External_Name => "ledger_core_apply_deposit";
+
+   function Apply_Buy
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32
+   with Export, Convention => C, External_Name => "ledger_core_apply_buy";
+
+   function Apply_Sell
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32
+   with Export, Convention => C, External_Name => "ledger_core_apply_sell";
+
+   function Apply_Revalue
+     (Set : System.Address; Prev : System.Address; Next : System.Address)
+      return Int32
+   with
+     Export, Convention => C, External_Name => "ledger_core_apply_revalue";
+
    function Diff_Totals
      (To : System.Address; From : System.Address; Diff : System.Address)
       return Int32
@@ -154,6 +178,19 @@ package Ledger_Core.C_API with SPARK_Mode => Off is
       Report        : System.Address) return Int32
    with
      Export, Convention => C, External_Name => "ledger_core_period_report";
+
+   --  Period_Report, reconciled against the cost basis of the same period:
+   --  the realized gain is Basis.Realized_Gain and the unrealized gain is
+   --  computed independently (market minus basis) and must agree with the
+   --  ledger (status 9 otherwise).
+   function Period_Report_Checked
+     (Opening : System.Address;
+      Closing : System.Address;
+      Basis   : System.Address;
+      Report  : System.Address) return Int32
+   with
+     Export, Convention => C,
+     External_Name => "ledger_core_period_report_checked";
 
    --  ---- Display ----
 

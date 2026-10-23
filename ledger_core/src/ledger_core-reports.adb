@@ -171,4 +171,38 @@ package body Ledger_Core.Reports with SPARK_Mode is
       Result := Ok;
    end Period;
 
+   procedure Period_Checked
+     (Opening : Wire.Totals;
+      Closing : Wire.Totals;
+      Basis   : Wire.Basis_Report;
+      Report  : out Wire.Period_Report;
+      Result  : out Status)
+   is
+      Statements : Wire.Period_Report;
+   begin
+      Report := Zero_Period;
+      if Basis.Basis_At_Start not in Aggregate
+        or else Basis.Basis_At_End not in Aggregate
+        or else Basis.Purchased not in Aggregate
+        or else Basis.Consumed not in Aggregate
+      then
+         Result := Out_Of_Range;
+         return;
+      end if;
+      Period (Opening, Closing, Basis.Realized_Gain, Statements, Result);
+      if Result /= Ok then
+         return;
+      end if;
+      if Basis.Purchased /= Basis.Consumed + Basis.Basis_At_End
+        or else Statements.Income.Unrealized_Gain /=
+                  Unrealized_Change
+                    (Statements.Opening.Holdings, Statements.Closing.Holdings,
+                     Basis.Basis_At_Start, Basis.Basis_At_End)
+      then
+         Result := Not_Reconciled;
+         return;
+      end if;
+      Report := Statements;
+   end Period_Checked;
+
 end Ledger_Core.Reports;

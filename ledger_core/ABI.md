@@ -1,4 +1,4 @@
-# ledger_core C ABI (authoritative, version 0.2.0 = `engine_version` 200)
+# ledger_core C ABI (authoritative, version 0.3.0 = `engine_version` 300)
 
 This file is the contract for callers (Rails via Ruby `ffi`). It is exact and
 complete: every exported symbol, struct layout, status code and bound is here.
@@ -10,6 +10,69 @@ no allocation, no global state. Every function is thread-safe and reentrant.
 integers, passes them to these functions and formats strings from the pieces
 returned. (Calendar/time-zone arithmetic such as `1.month.ago`, and the SHA-256
 random number, are the only things that stay in Ruby.)
+
+## What changed in the 2026-10-22 audit pass (`engine_version` 300)
+
+All changes are **additive for callers**, with two deliberate behaviour changes
+to quoting. `engine_version` now returns 300 (Ruby asserts it; the Ruby adoption, see
+"Adopting the changes" below, is done).
+
+**New exports (5, named `ledger_core_*`)**: `apply_deposit`, `apply_buy`,
+`apply_sell`, `apply_revalue` (typed variants of `apply_transaction`, audit E4)
+and `period_report_checked` (audit E2). 36 exports in total (the "33" in the
+0.2.0 notes below was a miscount; the list there is correct).
+
+**Behaviour changes (quotes, audit E3 / E5):**
+
+* **Minimum cost (E3).** `quote_buy` / `quote_sell` now guarantee `costs >= 1`
+  cent whenever the value is positive. If `ceil(V * spread_bps / 10000)` and
+  `round_half_up(V * fee_bps / 10000)` are both 0 (only possible with
+  `spread_bps = 0` and a small fee, or both rates 0), the **spread is raised to
+  1 cent**. Reproduction: price 149 centicents, spread 0, fee 100 bps: one round
+  is worth 1.49 cents but was booked at 1 cent with a fee of 0, so 100 buys booked
+  100 cents of holdings that revalued to 149 cents, a free gain of 49 cents.
+  **The default configuration (spread 50 bps, fee 100 bps) is numerically
+  unchanged**: its spread is a ceiling, already >= 1 cent for any positive value.
+  Only quotes with `spread_bps = 0` and `round_half_up(V*fee_bps/10000) = 0` (or
+  both rates 0) change, by +1 cent of spread.
+* **Zero value is not a quote (E5).** `quote_buy` / `quote_sell` return status
+  `1` (`Bad_Argument`) when the value `V = round_half_up(qty*price/100)` is 0
+  (zero quantity, or a price too low to be worth half a cent), where they used
+  to return Ok with all-zero fields that `build_buy`/`build_sell` then refused
+  with status 1 anyway. The order of checks is: range errors (status 2) first,
+  then `V = 0` (1), then the business rules (4, 5, 6). `market_value` is
+  unchanged: it still returns Ok with 0 for `qty = 0` (used per caliber by
+  `revalue`). Prices under 100 centicents are the caller's policy (the engine
+  accepts any price in 0..10^7; the mock price walk clamps at >= 100).
+* **Proved** (E7): the quote's `value` is exactly `round_half_up(qty*price/100)`,
+  `spread = max(ceil(V*spread_bps/10000), 1 if the fee is also 0)`, `fee`,
+  `costs = spread + fee >= 1`, balanced.
+
+**New behaviour (E2, `period_report_checked`)**: see the function. It returns
+status 9 when the cost-basis realized/unrealized split disagrees with the
+ledger. Existing `period_report` / `income_statement` are unchanged and still
+compute `unrealized = trading_gain - realized` as a residual; prefer
+`period_report_checked`.
+
+**Hardening without ABI change (E8, E9):** `apply_transaction` and
+`diff_totals` read (copy) every input before writing the output, so an output
+that overlaps an input can no longer bypass the validity/balance checks;
+`sample_times` checks its buffer bounds at run time instead of by a
+precondition (see "Aliasing and lengths").
+
+### Adopting the changes (Ruby)
+
+1. Add the five symbols to `native.rb` (signatures in the prelude below).
+2. Post transactions with the typed entry points: `apply_deposit` for the signup
+   deposit and deposits, `apply_buy` / `apply_sell` for trades, `apply_revalue`
+   for ticks. A set of the wrong shape for the kind is status 1.
+3. Treat status 1 from `quote_buy`/`quote_sell` as a user refusal ("trade too
+   small"), not an engine bug (it used to surface later from `build_*`).
+4. Statements: call `period_report_checked(opening, closing, basis_report, out)`
+   with the `BasisReport` of the same period and trades instead of
+   `period_report`; status 9 (`Not_Reconciled`) means the ledger and the trades
+   disagree and must be a loud error (never render the statement).
+5. Version assertion bumped to 300 together with the engine (done).
 
 ## What changed from the first version (0.1.0)
 
@@ -23,7 +86,7 @@ same signatures. Behaviour changes:
   int32. A caliber may now hold at most 10^9 units and (weighted average) at
   most 10^17 cents of basis (status 2). `purchased`, total sales and any total
   over 10^17 give status 2.
-* `ledger_core_engine_version` returns 200.
+* `ledger_core_engine_version` returned 200 in 0.2.0 (300 since 0.3.0).
 * New status `10` (`Internal_Error`).
 * The old 5x2 `AccountTotals` and the 4x5x2 `Activity` structs are unchanged;
   `Activity` is the same layout as the new `Totals` (running totals).
@@ -90,6 +153,21 @@ library also exports Ada-mangled names that are not part of the ABI.
   Exception: when a pointer argument is NULL (status 1) nothing is written.
 * Pointers: caller allocates all memory. Output memory must not overlap any
   input memory (outputs are zeroed first).
+* **Aliasing and lengths (audit E9).** Output memory must not overlap input
+  memory (above). `apply_transaction`, the typed `apply_*` entry points and
+  `diff_totals` are additionally safe when it does: they copy every input before
+  writing any output, so an aliased output cannot bypass a check (they then
+  behave as if the memory did not overlap). Nothing else guarantees this. The
+  engine cannot know the length of a C array: **the caller must pass a pointer
+  to at least `count` elements** (`count * 16` bytes for postings, `* 32` for
+  trades, `* 320` for `Totals` rows, `* 8` for `int64` arrays, `* 48` for
+  candles, `max_points * 8` for `sample_times`) and, for structs, the full size
+  in the layout table. Reading past a buffer is the caller's bug; where it faults
+  the shim returns status 10 (best effort, not a guarantee). No exported
+  subprogram has a `Pre` contract (contracts are compiled out of the shipped
+  library): every argument is checked at run time and reported by a status. This
+  is enforced by `ledger_core/tests/check_contract_boundary.rb` (run by
+  `diff_test.rb`, hence by `script/test` and CI).
 * Pointers (continued): A NULL pointer where one is required
   gives status 1 (`Bad_Argument`). Arrays are pointer + `int32` count; the
   engine only reads input arrays. For an array argument with count 0 the
@@ -103,7 +181,7 @@ library also exports Ada-mangled names that are not part of the ABI.
 | Code | Name                  | Meaning |
 |------|-----------------------|---------|
 | 0    | Ok                    | Success. |
-| 1    | Bad_Argument          | NULL pointer, negative count, count outside 1..16 for postings, unknown account/side/method/kind/invert code, non-positive posting or deposit amount, `t_start > t_end`, empty input where at least one element is needed, inconsistent range arguments (documented per function). |
+| 1    | Bad_Argument          | NULL pointer, negative count, count outside 1..16 for postings, unknown account/side/method/kind/invert code, non-positive posting or deposit amount, `t_start > t_end`, empty input where at least one element is needed, inconsistent range arguments (documented per function), a quote whose value is 0, postings whose shape does not match the typed `apply_*` entry point. |
 | 2    | Out_Of_Range          | A number is outside its documented bounds (see Bounds), a total would exceed its limit. |
 | 3    | Unbalanced            | Debits do not equal credits (transaction, running totals, account totals, or an inconsistent quote). |
 | 4    | Insufficient_Cash     | Buy total (value + costs) exceeds `cash_available`. |
@@ -111,7 +189,7 @@ library also exports Ada-mangled names that are not part of the ABI.
 | 6    | Negative_Proceeds     | Sell costs exceed sell value. |
 | 7    | Bad_Order             | Trades not grouped/ordered as required, or running totals go backwards (`diff_totals`, `audit_chain`, `period_report`). |
 | 8    | Negative_Balance      | Cash or holdings balance would be/is negative. |
-| 9    | Not_Reconciled        | `cash_flow` does not reconcile. |
+| 9    | Not_Reconciled        | `cash_flow` does not reconcile; `period_report_checked`: the cost basis report is inconsistent or its realized/unrealized split disagrees with the ledger. |
 | 10   | Internal_Error        | An Ada exception was caught at the C boundary (should never happen). |
 
 ### Units
@@ -255,6 +333,10 @@ module LedgerCore
     engine_version: [[], :int32],
     validate_transaction: [%i[int32 pointer], :int32],
     apply_transaction: [%i[int32 pointer pointer pointer], :int32],
+    apply_deposit: [%i[pointer pointer pointer], :int32],
+    apply_buy: [%i[pointer pointer pointer], :int32],
+    apply_sell: [%i[pointer pointer pointer], :int32],
+    apply_revalue: [%i[pointer pointer pointer], :int32],
     diff_totals: [%i[pointer pointer pointer], :int32],
     collapse_kinds: [%i[pointer pointer], :int32],
     audit_chain: [%i[int32 pointer], :int32],
@@ -273,6 +355,7 @@ module LedgerCore
     income_statement: [%i[pointer int64 pointer], :int32],
     cash_flow: [%i[pointer int64 int64 pointer], :int32],
     period_report: [%i[pointer pointer int64 pointer], :int32],
+    period_report_checked: [%i[pointer pointer pointer pointer], :int32],
     split_money: [%i[int64 pointer], :int32],
     split_price: [%i[int64 pointer], :int32],
     negate: [%i[int64 pointer], :int32],
@@ -307,7 +390,7 @@ sets. `market_value`, `quote_*` price a trade. `apply_trade_quantity`,
 
 ### `int32 ledger_core_engine_version(void)`
 
-Returns `major * 10000 + minor * 100 + patch`; currently `200` (0.2.0). Never fails.
+Returns `major * 10000 + minor * 100 + patch`; currently `300` (0.3.0). Never fails.
 
 ### `int32 ledger_core_validate_transaction(int32 count, const Posting *postings)`
 
@@ -372,7 +455,14 @@ unbalanced (3); `prev` has a cell outside 0..`Max_Cell` (2); `prev` unbalanced
 negative (8). When Ok, `next` equals `prev` plus, for kind `kind` only, exactly
 the amounts the postings put on each account and side; `next` is balanced (total
 debits = total credits) and cash/holdings are >= 0. Output buffers must not overlap input buffers
-(see Conventions).
+(see Conventions; this function copies its inputs first, so an overlapping
+`next` cannot bypass a check).
+
+**This general entry point does not bind `kind` to the posting shape** (audit
+E4): any valid balanced set may be applied under any kind, which would book,
+for example, a revaluation gain as a "deposit" in the running totals (the
+statements classify cash flows by kind). Prefer the typed entry points below;
+this one stays for backward compatibility.
 
 ```ruby
 prev = FFI::MemoryPointer.new(:int8, LedgerCore::TOTALS_BYTES)   # zeros = empty ledger
@@ -381,12 +471,35 @@ LedgerCore.apply_transaction(0, set, prev, nxt) # => 0; kind 0 = deposit
 nxt.read_array_of_int64(40) # persist these 40 numbers on the new row
 ```
 
+### `int32 ledger_core_apply_deposit` / `apply_buy` / `apply_sell` / `apply_revalue(const PostingSet *set, const Totals *prev, Totals *next)`
+
+New. Typed variants of `apply_transaction` with the kind fixed by the entry
+point (0 deposit, 1 buy, 2 sell, 3 revalue) **and the postings required to
+have that kind's shape**. With P(account, side) the total amount posted to one
+cell (account codes in the table below, side 0 Dr / 1 Cr):
+
+| Export          | Allowed cells | Must be positive |
+|-----------------|---------------|------------------|
+| `apply_deposit` | Dr Cash, Cr Owner's Capital | Dr Cash |
+| `apply_buy`     | Dr Holdings, Dr Trading Costs, Cr Cash | Cr Cash |
+| `apply_sell`    | Dr Cash, Dr Trading Costs, Cr Holdings | Cr Holdings |
+| `apply_revalue` | exactly one of: {Dr Holdings, Cr Trading Gain/Loss} (gain) or {Dr Trading Gain/Loss, Cr Holdings} (loss) | both cells of the chosen pair |
+
+Any posting to another cell, or a revalue posting in both directions, is status
+`1`. (The shapes are exactly what `build_deposit`, `build_buy`, `build_sell` and
+`revalue` produce; a set may split an amount over several postings of the same
+cell.) Order of checks: pointers (1); the set invalid (1, 2, 3 exactly as in
+`apply_transaction`); wrong shape for the kind (1); then the remaining checks
+and results of `apply_transaction` (2, 3, 2, 8), with the same guarantees when
+Ok. Output must not overlap inputs (it is nevertheless safe, as above).
+
 ### `int32 ledger_core_diff_totals(const Totals *to, const Totals *from, Totals *diff)`
 
 Period activity: `diff = to - from`, per cell. Status: 2 (either input invalid:
 a cell outside 0..`Max_Cell`), 3 (either unbalanced), 7 (`to` below `from` in
 some cell). When Ok, `diff` is valid, balanced and non-negative, so it is a
-valid `Activity` for `cash_flow`.
+valid `Activity` for `cash_flow`. Both inputs are read before `diff` is
+written, so `diff` may even overlap `to` or `from` without bypassing a check.
 
 ### `int32 ledger_core_collapse_kinds(const Totals *totals, AccountTotals *out)`
 
@@ -412,6 +525,40 @@ outside +-10^18); cash flow (9). When Ok it is **proved** that
 `income.net_income == closing.net_income_to_date - opening.net_income_to_date`,
 that `opening.cash + flow.net_change == closing.cash`, and that assets =
 liabilities + equity at both ends. Rails does not need any further check.
+Note that `income.unrealized_gain` here is the *residual* `trading_gain -
+realized_gain`; nothing checks it against the trades. Use
+`period_report_checked` for that.
+
+### `int32 ledger_core_period_report_checked(const Totals *opening, const Totals *closing, const BasisReport *basis, PeriodReport *out)`
+
+New (audit E2). Like `period_report`, but the realized/unrealized split is
+**proved against the cost basis instead of assumed**. `basis` is the
+`BasisReport` that `cost_basis` returned for the same user, trades and period
+`(t_start, t_end]` whose ledger rows are `opening` (as of `t_start`) and
+`closing` (as of `t_end`). The income statement uses `realized_gain =
+basis.realized_gain`, and the engine independently computes the change in
+unrealized gain from the market side and the cost side:
+
+`unrealized = (closing.holdings - basis.basis_at_end) - (opening.holdings - basis.basis_at_start)`
+
+(Holdings are carried at market value, so the Holdings balance is the market
+value.) The statement is returned only if it equals the ledger's residual
+(`trading_gain - realized_gain`). Mathematically this holds exactly whenever the
+trades given to `cost_basis` are exactly the trades that moved the Holdings
+account (same `value` per trade as the quote's `value`), whatever the prices did,
+because `trading_gain = delta holdings - purchases + sales` and `delta basis =
+purchases - consumed`.
+
+Status: pointers (1); any of `basis_at_start`, `basis_at_end`, `purchased`,
+`consumed` outside 0..10^17 (2); then every status of `period_report` in its
+order (2, 3, 7, 8, 9; `basis.realized_gain` outside +-10^18 is 2); then 9
+(`Not_Reconciled`) if `basis.purchased != basis.consumed + basis.basis_at_end`
+or the ledger's trading gain/loss disagrees with `realized + unrealized` as
+above (the trades and the ledger tell different stories: a missing or
+mis-valued trade). On Ok the report equals `period_report`'s and, additionally,
+it is proved that `income.unrealized_gain` equals the independent figure and
+`income.trading_gain_total = realized + unrealized`. On any non-zero status
+`out` is zeroed. Treat 9 as a loud error; never render the statement.
 
 ### `int32 ledger_core_market_value(int64 qty, int64 price, int64 *value)`
 
@@ -422,9 +569,13 @@ liabilities + equity at both ends. Rails does not need any further check.
 
 Computes value V, `spread = ceil(V*spread_bps/10000)`, `fee =
 round_half_up(V*fee_bps/10000)`, `costs = spread + fee`, `total_cash_out = V +
-costs`. Status: 2 (qty/price out of range, bps not in 0..10000, V > 10^12, or
-total > 10^12), 4 (`total_cash_out > cash_available`; equality is allowed).
-Build the postings with `build_buy`.
+costs`. **Minimum cost (audit E3):** when V > 0 and the spread and the fee both
+come out 0, the spread is raised to 1 cent, so `costs >= 1` for every quote
+(unchanged for the default 50/100 bps). Status: 2 (qty/price out of range, bps
+not in 0..10000, V > 10^12, or total > 10^12), **1 (V = 0, audit E5; checked
+after the range errors, before the cash check)**, 4 (`total_cash_out >
+cash_available`; equality is allowed). `value` is proved to be exactly
+`round_half_up(qty*price/100)`. Build the postings with `build_buy`.
 
 ```ruby
 q = FFI::MemoryPointer.new(:int8, 40)
@@ -434,11 +585,11 @@ q.read_array_of_int64(5) # => [25000, 125, 250, 375, 25375]
 
 ### `int32 ledger_core_quote_sell(int64 qty, int64 qty_held, int64 price, int64 spread_bps, int64 fee_bps, SellQuote *out)`
 
-Same value/spread/fee rules; `net_cash_in = value - costs`. Status: 2 (range
-errors as above, `qty_held < 0`), 5 (`qty > qty_held`), 6 (`costs > value`;
-`costs == value` is allowed and gives `net_cash_in = 0`). Build the postings
-with `build_sell`. Order: value (2), bps (2), `qty_held < 0` (2), oversell (5),
-proceeds (6).
+Same value/spread/fee rules (including the 1 cent minimum cost); `net_cash_in =
+value - costs`. Status: 2 (range errors as above, `qty_held < 0`), **1 (V = 0)**,
+5 (`qty > qty_held`), 6 (`costs > value`; `costs == value` is allowed and gives
+`net_cash_in = 0`). Build the postings with `build_sell`. Order: value (2), bps
+(2), `qty_held < 0` (2), zero value (1), oversell (5), proceeds (6).
 
 ### `int32 ledger_core_apply_trade_quantity(int64 held, int32 side, int64 qty, int64 *new_held)`
 
@@ -501,6 +652,17 @@ Outputs (cents):
   `basis_at_end` >= 0; the cumulative consumed basis never decreases (also for
   FIFO), never exceeds the cost purchased; `basis_at_end` is 0 whenever every
   unit has been sold.
+* Proved against the trades themselves (audit E1, ghost sums over the input,
+  independent of the replay): `purchased` = the cost of every buy with `time <=
+  t_end`; `realized_gain` = (value of the sells with `t_start < time <= t_end`)
+  - (`consumed` - basis consumed up to `t_start`), where the basis consumed up
+  to `t_start` = (cost of the buys with `time <= t_start`) - `basis_at_start`.
+  The same statement is proved for each caliber's replay (both methods). What
+  is **not** proved against an independent specification is the rounded size of
+  each consumed piece (weighted-average `round_half_up(B*q/n)`, FIFO per-lot
+  rounding); those are proved only as stated above (exact one-step formula for
+  weighted average, conservation and monotonicity for both) and are compared with
+  the independent Ruby reference in the differential test.
 
 Status: 1 (NULL `out`, NULL `trades` with count > 0, negative count, method not
 0/1, `t_start > t_end`, side not 0/1), 2 (qty/value out of range, limits above),
@@ -635,3 +797,32 @@ outside 0..10^17), 1 (not `low <= open,close <= high`), 2 (tick sum above 10^17)
 * `cost_basis` count is limited by the int32 count (2147483646 trades).
 * Amounts that do not fit the bounds above are rejected with status 2; they are
   never wrapped or truncated.
+
+### Decided limits (audit E6; not changed, on purpose)
+
+* **`revalue`: a market-vs-carrying difference above 10^12 cents
+  ($10,000,000,000) is refused with status 2**, although the Holdings total may
+  reach 10^17. A single posting is limited to `Max_Amount` = 10^12 everywhere in
+  the engine (builders, validation, the per-transaction proofs), and one
+  transaction has at most 16 postings, so a bigger revaluation cannot be one
+  valid transaction; splitting it over several postings would only move the
+  limit to 8 x 10^12 and not remove it. Raising `Max_Amount` would change every
+  proof bound and every Rails column assumption. It is also hard to reach: one
+  caliber's market value is itself limited to 10^12 (`market_value` status 2
+  above that), so the carrying total is at most (number of calibers) x 10^12,
+  and a one-tick difference above 10^12 needs the whole portfolio, at the
+  holding limit in many calibers, to move by several percent in one tick (the
+  mock walk moves +-2%, i.e. about 3 x 10^11 at the very most with 15 calibers).
+  A user who somehow got there would get `revalue` status 2 on every tick: no
+  revaluation is posted for that user, their books stay balanced and statements
+  keep working at the stale carrying value. Callers must treat status 2 from
+  `revalue` as a per-user error (log it, continue with the other users), never as
+  a reason to abort a whole tick run. If this ever matters, the fix is to clamp
+  the posted amount to 10^12 per transaction and converge over successive ticks;
+  that changes the meaning of `Revaluation.amount` and was not done.
+* **`cost_basis` weighted-average basis above 10^17 fails the whole report**
+  (status 2) rather than being clamped: wrong money is worse than an error. It
+  is unreachable with engine-built trades: a caliber holds at most 10^9 rounds
+  and a trade's `value` comes from `quote_buy` (<= qty * 10^7 / 100 cents), so
+  one caliber's basis is at most 10^9 * 10^5 = 10^14 cents, three orders below
+  the limit. Only hand-supplied `value`s (up to 10^12 per trade) can reach it.

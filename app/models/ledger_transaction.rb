@@ -10,6 +10,9 @@ class LedgerTransaction < ApplicationRecord
     .map { |kind, account, side| "#{kind}_#{account}_#{side}" }.freeze
 
   belongs_to :user
+  # The user's previous ledger row (nil for the first); see the chain guard in
+  # db/migrate/20261023000400_add_ledger_chain_and_checks.rb.
+  belongs_to :previous, class_name: "LedgerTransaction", optional: true
   has_many :postings, class_name: "LedgerPosting", dependent: nil
   has_one :trade, dependent: nil
 

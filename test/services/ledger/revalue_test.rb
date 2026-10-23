@@ -12,6 +12,28 @@ module Ledger
       PriceTick.create!(caliber: caliber, price_centicents: price, as_of: Time.utc(2026, 1, 1, 1, minute))
     end
 
+    test "reads the latest prices inside the user's lock, never before it" do
+      events = []
+      real_prices = Ledger.method(:latest_prices)
+      with_singleton(@user, :with_lock, ->(&block) { events << :lock; block.call }) do
+        with_singleton(Ledger, :latest_prices, -> { events << :prices; real_prices.call }) do
+          Revalue.call(@user)
+        end
+      end
+      assert_equal [ :lock, :prices ], events
+    end
+
+    test "all_holders takes prices per user, inside each user's lock" do
+      fund(users(:two))
+      Buy.call(users(:two), calibers(:nine_mm), 10)
+      reads = 0
+      real_prices = Ledger.method(:latest_prices)
+      with_singleton(Ledger, :latest_prices, -> { reads += 1; real_prices.call }) do
+        Revalue.all_holders
+      end
+      assert_equal 2, reads
+    end
+
     test "posts nothing when carrying value equals market value" do
       assert_no_difference "LedgerTransaction.count" do
         assert_nil Revalue.call(@user)
@@ -73,7 +95,7 @@ module Ledger
       assert_equal [ at ], Revalue.all_holders(at: at).map(&:occurred_at)
     end
 
-    test "all_holders logs a failing user and carries on" do
+    test "all_holders logs a failing user, carries on, then raises RevalueFailed so the failure is observable" do
       other = users(:two)
       fund(other)
       Buy.call(other, calibers(:nine_mm), 10)
@@ -84,11 +106,33 @@ module Ledger
       original = Revalue.method(:call)
       failing_id = @user.id
       failing = ->(user, **opts) { user.id == failing_id ? raise("boom") : original.call(user, **opts) }
-      txs = with_singleton(Revalue, :call, failing) { Revalue.all_holders(logger: logger) }
-      assert_equal [ other.id ], txs.map(&:user_id)
+      error = with_singleton(Revalue, :call, failing) do
+        assert_raises(RevalueFailed) { Revalue.all_holders(logger: logger) }
+      end
+      assert_equal [ other.id ], error.transactions.map(&:user_id), "the other user was still revalued"
+      assert_equal [ failing_id ], error.failures.keys
+      assert_equal "boom", error.failures[failing_id].message
+      assert_includes error.message, "user(s) #{failing_id}"
+      assert_includes error.message, "boom"
       assert_equal 1, messages.size
       assert_includes messages.first, "user #{@user.id}"
       assert_includes messages.first, "boom"
+    end
+
+    test "all_holders logs engine errors to Rails.logger by default" do
+      tick(calibers(:nine_mm), 2600, 0)
+      lines = []
+      sink = Object.new
+      sink.define_singleton_method(:error) { |message| lines << message }
+      failing = ->(*) { raise LedgerEngine::Error.new(:out_of_range, :revalue) }
+      with_singleton(Rails, :logger, -> { sink }) do
+        with_singleton(LedgerEngine, :revalue, failing) do
+          error = assert_raises(RevalueFailed) { Revalue.all_holders }
+          assert_equal :out_of_range, error.failures.fetch(@user.id).status
+        end
+      end
+      assert_equal 1, lines.size
+      assert_includes lines.first, "out_of_range"
     end
 
     test "failure inside a user's revaluation rolls back that user's writes" do

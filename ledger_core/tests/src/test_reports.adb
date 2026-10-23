@@ -231,4 +231,125 @@ begin
       Check.Is_Status ("period cash outside the patterns", Result,
                        Not_Reconciled);
    end;
+
+   --  Unrealized_Change and Period_Checked (audit E2): the realized /
+   --  unrealized split is checked against the cost basis.
+   declare
+      use type Wire.Totals;
+      use type Wire.Period_Report;
+      Zero    : constant Wire.Totals := (others => (others => (0, 0)));
+      Opens   : Wire.Totals := Zero;
+      After   : Wire.Totals;
+      Closes  : Wire.Totals;
+      Rep     : Wire.Period_Report;
+      Plain   : Wire.Period_Report;
+      Basis   : Wire.Basis_Report;
+   begin
+      Check.Eq ("unrealized change: gain", Unrealized_Change
+                  (0, 26_000, 0, 25_000), 1_000);
+      Check.Eq ("unrealized change: realization",
+                Unrealized_Change (26_000, 13_000, 25_000, 12_500), -500);
+      Check.Eq ("unrealized change: loss at both ends",
+                Unrealized_Change (100, 90, 150, 140), 0);
+      Check.Eq ("unrealized change: extremes",
+                Unrealized_Change (Max_Aggregate, 0, 0, Max_Aggregate),
+                -2 * Max_Aggregate);
+
+      --  Opening: deposit, buy 1000 rounds (value 25000, costs 375),
+      --  revalue gain 1000 (holdings 26000).
+      Opens (0, 1).Debits := 177_600;
+      Opens (0, 3).Credits := 177_600;
+      Opens (1, 2).Debits := 25_000;
+      Opens (1, 5).Debits := 375;
+      Opens (1, 1).Credits := 25_375;
+      Opens (3, 2).Debits := 1_000;
+      Opens (3, 4).Credits := 1_000;
+
+      --  Whole history from nothing: the buy and the gain.
+      Basis := (Realized_Gain => 0, Basis_At_Start => 0,
+                Basis_At_End => 25_000, Purchased => 25_000, Consumed => 0);
+      Period_Checked (Zero, Opens, Basis, Rep, Result);
+      Check.Is_Status ("checked: first period", Result, Ok);
+      Check.Eq ("checked: unrealized", Rep.Income.Unrealized_Gain, 1_000);
+      Check.Eq ("checked: realized", Rep.Income.Realized_Gain, 0);
+      Period (Zero, Opens, 0, Plain, Result);
+      Check.Holds ("checked report = plain report when it reconciles",
+                   Rep = Plain);
+
+      --  Then sell half (market value 13000, costs 195, cost basis 12500).
+      After := Opens;
+      After (2, 1).Debits := 12_805;
+      After (2, 5).Debits := 195;
+      After (2, 2).Credits := 13_000;
+      Closes := After;
+      Basis := (Realized_Gain => 500, Basis_At_Start => 25_000,
+                Basis_At_End => 12_500, Purchased => 25_000,
+                Consumed => 12_500);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: sale", Result, Ok);
+      Check.Eq ("checked: sale realized", Rep.Income.Realized_Gain, 500);
+      Check.Eq ("checked: sale unrealized", Rep.Income.Unrealized_Gain, -500);
+      Check.Eq ("checked: sale gain total", Rep.Income.Trading_Gain_Total, 0);
+      Check.Eq ("checked: sale costs", Rep.Income.Trading_Costs, 195);
+      Check.Eq ("checked: closing holdings", Rep.Closing.Holdings, 13_000);
+
+      --  A different split with the same total is a different story: the
+      --  ledger says the period's trading gain is 0, the basis says
+      --  500 + (-400).
+      Basis := (Realized_Gain => 500, Basis_At_Start => 25_000,
+                Basis_At_End => 12_400, Purchased => 25_000,
+                Consumed => 12_600);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: split disagrees with the ledger", Result,
+                       Not_Reconciled);
+      Check.Holds ("checked: not reconciled zeroes", Rep = Zero_Period);
+      Basis := (Realized_Gain => 600, Basis_At_Start => 25_000,
+                Basis_At_End => 12_600, Purchased => 25_000,
+                Consumed => 12_400);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: another consistent split", Result, Ok);
+      Check.Eq ("checked: its unrealized", Rep.Income.Unrealized_Gain, -600);
+
+      --  The basis report must be internally consistent.
+      Basis := (Realized_Gain => 500, Basis_At_Start => 25_000,
+                Basis_At_End => 12_500, Purchased => 25_000,
+                Consumed => 12_000);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: purchased /= consumed + basis", Result,
+                       Not_Reconciled);
+
+      --  Basis fields out of range.
+      Basis := (0, -1, 0, 0, 0);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: negative start basis", Result, Out_Of_Range);
+      Check.Holds ("checked: range error zeroes", Rep = Zero_Period);
+      Basis := (0, 0, -1, 0, 0);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: negative end basis", Result, Out_Of_Range);
+      Basis := (0, 0, 0, -1, 0);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: negative purchased", Result, Out_Of_Range);
+      Basis := (0, 0, 0, 0, -1);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: negative consumed", Result, Out_Of_Range);
+      Basis := (0, Max_Aggregate + 1, 0, 0, 0);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: huge start basis", Result, Out_Of_Range);
+
+      --  The statuses of Period come through.
+      Basis := (0, 0, 0, 0, 0);
+      Period_Checked (Closes, Opens, Basis, Rep, Result);
+      Check.Is_Status ("checked: backwards period", Result, Bad_Order);
+      Basis := (Max_Gain + 1, 0, 0, 0, 0);
+      Period_Checked (Opens, Closes, Basis, Rep, Result);
+      Check.Is_Status ("checked: realized out of range", Result,
+                       Out_Of_Range);
+
+      --  Period of nothing.
+      Basis := (0, 25_000, 25_000, 25_000, 0);
+      Period_Checked (Opens, Opens, Basis, Rep, Result);
+      Check.Is_Status ("checked: empty period", Result, Ok);
+      Check.Eq ("checked: empty period unrealized", Rep.Income.Unrealized_Gain,
+                0);
+   end;
 end Test_Reports;

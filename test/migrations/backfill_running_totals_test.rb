@@ -5,12 +5,16 @@ require Rails.root.join("db/migrate/20261023000300_backfill_running_totals")
 # written before those columns existed.
 class BackfillRunningTotalsTest < ActiveSupport::TestCase
   def run_migration
-    ActiveRecord::Migration.suppress_messages { BackfillRunningTotals.new.up }
+    without_ledger_triggers do # the migration predates the append-only triggers and rewrites rows
+      ActiveRecord::Migration.suppress_messages { BackfillRunningTotals.new.up }
+    end
   end
 
   def wipe_totals
-    LedgerTransaction.update_all(LedgerTransaction::TOTALS_COLUMNS.index_with { 0 }) # bypasses append-only models on purpose
-    Trade.update_all(quantity_after: 0)
+    without_ledger_triggers do
+      LedgerTransaction.update_all(LedgerTransaction::TOTALS_COLUMNS.index_with { 0 }) # bypasses append-only models on purpose
+      Trade.update_all(quantity_after: 0)
+    end
   end
 
   test "replaying through the engine restores exactly the totals and holdings the services wrote" do
@@ -44,8 +48,41 @@ class BackfillRunningTotalsTest < ActiveSupport::TestCase
 
   test "a historic row the engine refuses fails the migration loudly" do
     fund(users(:one))
-    LedgerPosting.where(ledger_transaction_id: LedgerTransaction.last.id, side: 1).update_all(amount_cents: 2) # credits != debits
+    without_ledger_triggers { LedgerPosting.where(ledger_transaction_id: LedgerTransaction.last.id, side: 1).update_all(amount_cents: 2) } # credits != debits
     assert_raises(LedgerEngine::Error) { run_migration }
+  end
+
+  test "a replay that disagrees with the postings fails the verification loudly" do
+    fund(users(:one))
+    real = LedgerEngine.method(:apply_transaction)
+    corrupt = ->(kind, postings, previous) { real.call(kind, postings, previous).each_with_index.map { |v, i| [ 0, 5 ].include?(i) ? v + 1 : v } }
+    with_singleton(LedgerEngine, :apply_transaction, corrupt) do
+      error = assert_raises(RuntimeError) { run_migration }
+      assert_includes error.message, "Backfill verification failed for user #{users(:one).id}"
+    end
+  end
+
+  test "a quantity_after that disagrees with the trades fails the verification loudly" do
+    fund(users(:one))
+    Ledger::Buy.call(users(:one), calibers(:nine_mm), 10)
+    wrong = ->(held, _side, _qty) { held }
+    with_singleton(LedgerEngine, :apply_trade_quantity, wrong) do
+      error = assert_raises(RuntimeError) { run_migration }
+      assert_includes error.message, "quantity_after 0 but bought 10 != sold + held 0"
+    end
+  end
+
+  test "a historic row with an unknown kind is refused" do
+    fund(users(:one))
+    connection = ActiveRecord::Base.connection
+    without_ledger_triggers do
+      connection.execute("PRAGMA ignore_check_constraints = ON") # the CHECK would stop us writing kind 9
+      LedgerTransaction.where(id: LedgerTransaction.last.id).update_all(kind: 9)
+    ensure
+      connection.execute("PRAGMA ignore_check_constraints = OFF")
+    end
+    error = assert_raises(ArgumentError) { run_migration }
+    assert_includes error.message, "unknown kind 9"
   end
 
   test "down is a no-op" do

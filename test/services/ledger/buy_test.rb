@@ -106,6 +106,21 @@ module Ledger
       assert_raises(Poster::OutOfOrder) { Buy.call(@user, @nine, 1, at: AT - 1) }
     end
 
+    test "a trade worth nothing (engine quote status 1) is a friendly refusal and writes nothing" do
+      PriceTick.create!(caliber: @nine, price_centicents: 1, as_of: Time.utc(2100, 1, 1))
+      assert_no_difference [ "Trade.count", "LedgerTransaction.count" ] do
+        error = assert_raises(Refused) { Buy.call(@user, @nine, 1) }
+        assert_equal "This trade is too small to price. Try a larger quantity.", error.message
+      end
+    end
+
+    test "bad_argument from anywhere but the quote is a bug, not a refusal" do
+      failing = ->(*) { raise LedgerEngine::Error.new(:bad_argument, :build_buy) }
+      with_singleton(LedgerEngine, :build_buy, failing) do
+        assert_equal :bad_argument, assert_raises(LedgerEngine::Error) { Buy.call(@user, @nine, 1) }.status
+      end
+    end
+
     test "locks the user" do
       locked = false
       with_singleton(@user, :with_lock, ->(&block) { locked = true; block.call }) { Buy.call(@user, @nine, 1) }
@@ -118,8 +133,10 @@ module Ledger
       config.spread_bps = 0
       config.fee_bps = 0
       trade = Buy.call(@user, @nine, 1000)
-      assert_equal [ 0, 0 ], [ trade.spread_cents, trade.fee_cents ]
-      assert_equal 177_600 - 25_500, Balances.sheet(@user).cash
+      # Audit E3: with spread and fee both rounding to nothing the engine charges a minimum
+      # of 1 cent (booked as spread), so a trade is never free.
+      assert_equal [ 1, 0 ], [ trade.spread_cents, trade.fee_cents ]
+      assert_equal 177_600 - 25_500 - 1, Balances.sheet(@user).cash
     ensure
       config.spread_bps, config.fee_bps = original
     end

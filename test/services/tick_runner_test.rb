@@ -31,6 +31,27 @@ class TickRunnerTest < ActiveSupport::TestCase
     end
   end
 
+  test "the index reads inside the tick's own transaction" do
+    joinable = []
+    index = Object.new
+    index.define_singleton_method(:current_prices) do |now:|
+      joinable << PriceTick.connection.current_transaction.joinable?
+      []
+    end
+    TickRunner.call(now: NOW, index: index)
+    assert_equal [ true ], joinable
+  end
+
+  test "an existing tick is skipped, never overwritten and never an error" do
+    PriceTick.create!(caliber: calibers(:nine_mm), price_centicents: 4242, as_of: Time.utc(2026, 5, 1, 12, 5))
+    ticks = nil
+    assert_difference "PriceTick.count", 1 do
+      ticks = TickRunner.call(now: NOW)
+    end
+    assert_equal [ calibers(:twenty_two).id ], ticks.map(&:caliber_id)
+    assert_equal 4242, calibers(:nine_mm).latest_tick.price_centicents
+  end
+
   test "the ledger revaluation hook is registered at boot" do
     # other tests clear the list in teardown; the registration itself is idempotent
     Ledger.register_tick_hook

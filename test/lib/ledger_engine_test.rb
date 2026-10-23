@@ -37,7 +37,7 @@ class LedgerEngineTest < ActiveSupport::TestCase
   end
 
   test "version" do
-    assert_equal 200, LedgerEngine.version
+    assert_equal 300, LedgerEngine.version
   end
 
   test "validate_transaction accepts a balanced transaction" do
@@ -62,7 +62,7 @@ class LedgerEngineTest < ActiveSupport::TestCase
   end
 
   test "int64 overflow never reaches the engine" do
-    assert_raises(RangeError) { LedgerEngine.market_value(2**70, 1) }
+    assert_equal :out_of_range, assert_raises(LedgerEngine::Error) { LedgerEngine.market_value(2**70, 1) }.status
   end
 
   test "market_value rounds half cents up" do

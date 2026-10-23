@@ -34,6 +34,22 @@ class UserTest < ActiveSupport::TestCase
     assert_not User.new(email_address: "a@example.com", password: "short").valid?
   end
 
+  test "rejects passwords longer than bcrypt's 72 bytes instead of silently truncating them" do
+    assert User.new(email_address: "a@example.com", password: "a" * 72).valid?
+    assert_not User.new(email_address: "a@example.com", password: "a" * 73).valid?
+    assert_not User.new(email_address: "a@example.com", password: "é" * 37).valid? # 74 bytes
+  end
+
+  test "rejects common passwords and passwords equal to the email address" do
+    %w[password 12345678 Password1 QWERTY123 iloveyou].each do |weak|
+      user = User.new(email_address: "a@example.com", password: weak)
+      assert_not user.valid?, "#{weak} should be rejected"
+      assert_includes user.errors[:password], "is too common"
+    end
+    assert_not User.new(email_address: "someone@example.com", password: "Someone@Example.com").valid?
+    assert User.new(email_address: "a@example.com", password: "correct horse battery").valid?
+  end
+
   test "authenticates with correct password only" do
     assert_equal users(:one), User.authenticate_by(email_address: "one@example.com", password: "password")
     assert_nil User.authenticate_by(email_address: "one@example.com", password: "wrong")

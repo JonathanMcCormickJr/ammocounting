@@ -82,5 +82,20 @@ module Ledger
       assert_equal 0, Sell.call(@user, @nine, 600, at: AT + 1).quantity_after
       assert_equal 0, Trade.held(@user, @nine)
     end
+
+    test "a trade worth nothing (engine quote status 1) is a friendly refusal and writes nothing" do
+      PriceTick.create!(caliber: @nine, price_centicents: 1, as_of: Time.utc(2100, 1, 1))
+      assert_no_difference [ "Trade.count", "LedgerTransaction.count" ] do
+        error = assert_raises(Refused) { Sell.call(@user, @nine, 1) }
+        assert_equal "This trade is too small to price. Try a larger quantity.", error.message
+      end
+    end
+
+    test "bad_argument from anywhere but the quote is a bug, not a refusal" do
+      failing = ->(*) { raise LedgerEngine::Error.new(:bad_argument, :build_sell) }
+      with_singleton(LedgerEngine, :build_sell, failing) do
+        assert_equal :bad_argument, assert_raises(LedgerEngine::Error) { Sell.call(@user, @nine, 1) }.status
+      end
+    end
   end
 end

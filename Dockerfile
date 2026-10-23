@@ -57,6 +57,44 @@ RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
 
 
 
+# Build stage for the SPARK engine (ledger_core): Alire + GNAT build the
+# relocatable shared library Rails loads through ffi. Same base image as the
+# final stage, so the glibc it links against is the one it runs on. Only
+# x86_64 is supported (the Alire release below; deploy.yml builds amd64).
+FROM base AS ledger
+
+ARG ALIRE_VERSION=2.1.0
+ARG ALIRE_SHA256=e3b32cb0afe981b23d1a68da77452cf81ee1d82de8ebaf01c5e233be8b463fbe
+
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y build-essential ca-certificates git patchelf unzip && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+
+RUN curl -fsSL -o /tmp/alr.zip "https://github.com/alire-project/alire/releases/download/v${ALIRE_VERSION}/alr-${ALIRE_VERSION}-bin-x86_64-linux.zip" && \
+    echo "${ALIRE_SHA256}  /tmp/alr.zip" | sha256sum -c - && \
+    unzip -j /tmp/alr.zip bin/alr -d /usr/local/bin && \
+    rm /tmp/alr.zip
+
+# Toolchain (GNAT + gprbuild), as `alire-project/setup-alire` does in CI.
+RUN alr --non-interactive toolchain --select gnat_native gprbuild
+
+WORKDIR /ledger_core
+COPY ledger_core/ ./
+
+# Release build of the shared library (dependencies, GNAT and GNATprove, come
+# via Alire). The library needs libgnat and libgcc_s from the Alire toolchain,
+# which the slim runtime image lacks: copy them beside the library and point
+# its RPATH at that directory ($ORIGIN) so nothing outside it is needed.
+RUN LEDGER_CORE_LIBRARY_TYPE=relocatable alr --non-interactive build --release && \
+    mkdir /out && \
+    cp -L lib/libLedger_Core.so /out/libLedger_Core.so && \
+    for dependency in libgnat libgcc_s; do \
+      cp -L "$(ldd /out/libLedger_Core.so | awk -v lib="$dependency" '$1 ~ "^" lib {print $3}')" /out/; \
+    done && \
+    patchelf --set-rpath '$ORIGIN' /out/*.so* && \
+    ! env -i ldd /out/libLedger_Core.so | grep -E "not found|alire|\.local"
+
+
 # Final stage for app image
 FROM base
 
@@ -68,6 +106,10 @@ USER 1000:1000
 # Copy built artifacts: gems, application
 COPY --chown=rails:rails --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
 COPY --chown=rails:rails --from=build /rails /rails
+
+# The SPARK engine: libLedger_Core.so with its Ada runtime beside it (RPATH $ORIGIN).
+COPY --chown=rails:rails --from=ledger /out/ /rails/ledger_core/lib/
+ENV LEDGER_CORE_LIB="/rails/ledger_core/lib/libLedger_Core.so"
 
 # Entrypoint prepares the database.
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]

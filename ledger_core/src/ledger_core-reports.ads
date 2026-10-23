@@ -150,6 +150,73 @@ package Ledger_Core.Reports with SPARK_Mode is
           Report.Income.Net_Income =
             Report.Closing.Net_Income - Report.Opening.Net_Income
           and then Report.Income.Realized_Gain = Realized_Gain
+          and then Report.Income.Trading_Gain_Total =
+                     Report.Income.Realized_Gain
+                     + Report.Income.Unrealized_Gain
+          and then Report.Opening.Holdings in Aggregate
+          and then Report.Closing.Holdings in Aggregate
+          and then Report.Opening.Cash + Report.Flow.Net_Change =
+                     Report.Closing.Cash
+          and then Report.Opening.Total_Assets =
+                     Report.Opening.Total_Liabilities
+                     + Report.Opening.Total_Equity
+          and then Report.Closing.Total_Assets =
+                     Report.Closing.Total_Liabilities
+                     + Report.Closing.Total_Equity
+        else Report = Zero_Period);
+
+   --  The change in unrealized gain over a period, computed from the market
+   --  side and the cost side separately (audit E2): (market value of the
+   --  holdings at the end - cost basis of the units held at the end) -
+   --  (the same at the start). Holdings are carried at market value, so the
+   --  Holdings balance is the market value.
+   function Unrealized_Change
+     (Holdings_Start, Holdings_End : Int64;
+      Basis_Start, Basis_End       : Int64) return Int64
+   is ((Holdings_End - Basis_End) - (Holdings_Start - Basis_Start))
+   with
+     Pre  =>
+       Holdings_Start in Aggregate and then Holdings_End in Aggregate
+       and then Basis_Start in Aggregate and then Basis_End in Aggregate,
+     Post =>
+       Unrealized_Change'Result in -2 * Max_Aggregate .. 2 * Max_Aggregate;
+
+   --  Period, with the realized/unrealized split proved against the cost
+   --  basis instead of assumed. Basis is the Cost_Basis.Compute report for
+   --  the same period (T_Start, T_End] and the same trades. The income
+   --  statement takes Realized_Gain = Basis.Realized_Gain, and its
+   --  unrealized gain (the residual trading gain/loss - realized) must equal
+   --  Unrealized_Change of the two balance sheets' Holdings and the basis
+   --  at both ends. Status: Out_Of_Range for a Basis field outside
+   --  0 .. Max_Aggregate (Realized_Gain outside +-Max_Gain also gives
+   --  Out_Of_Range, from Period); then the statuses of Period; then
+   --  Not_Reconciled when Basis.Purchased /= Basis.Consumed +
+   --  Basis.Basis_At_End or when the ledger's trading gain/loss does not
+   --  equal the independently computed realized + unrealized gain (the
+   --  trades given to the cost basis do not match the ledger).
+   procedure Period_Checked
+     (Opening : Wire.Totals;
+      Closing : Wire.Totals;
+      Basis   : Wire.Basis_Report;
+      Report  : out Wire.Period_Report;
+      Result  : out Status)
+   with
+     Post =>
+       (if Result = Ok then
+          Report.Income.Net_Income =
+            Report.Closing.Net_Income - Report.Opening.Net_Income
+          and then Report.Income.Realized_Gain = Basis.Realized_Gain
+          and then Basis.Purchased = Basis.Consumed + Basis.Basis_At_End
+          and then Report.Opening.Holdings in Aggregate
+          and then Report.Closing.Holdings in Aggregate
+          and then Basis.Basis_At_Start in Aggregate
+          and then Basis.Basis_At_End in Aggregate
+          and then Report.Income.Unrealized_Gain =
+                     Unrealized_Change
+                       (Report.Opening.Holdings, Report.Closing.Holdings,
+                        Basis.Basis_At_Start, Basis.Basis_At_End)
+          and then Report.Income.Trading_Gain_Total =
+                     Basis.Realized_Gain + Report.Income.Unrealized_Gain
           and then Report.Opening.Cash + Report.Flow.Net_Change =
                      Report.Closing.Cash
           and then Report.Opening.Total_Assets =

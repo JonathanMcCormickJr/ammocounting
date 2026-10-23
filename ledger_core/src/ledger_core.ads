@@ -60,6 +60,6 @@ package Ledger_Core with SPARK_Mode, Pure is
       Internal_Error        => 10);
 
    --  Version as major * 10000 + minor * 100 + patch.
-   function Engine_Version return Int32 is (200);
+   function Engine_Version return Int32 is (300);
 
 end Ledger_Core;

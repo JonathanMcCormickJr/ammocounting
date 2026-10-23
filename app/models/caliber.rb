@@ -18,8 +18,10 @@ class Caliber < ApplicationRecord
     [ "20 gauge", "20-gauge", 3800 ]
   ].freeze
 
-  has_many :price_ticks, dependent: :destroy
-  has_many :price_buckets, dependent: :destroy
+  # Price history and trades are facts that are never deleted, so a caliber with
+  # history cannot be destroyed (a bare destroy would also fail on the append-only triggers).
+  has_many :price_ticks, dependent: :restrict_with_exception
+  has_many :price_buckets, dependent: :restrict_with_exception
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true

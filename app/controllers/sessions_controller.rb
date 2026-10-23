@@ -2,6 +2,11 @@ class SessionsController < ApplicationController
   allow_unauthenticated_access only: %i[ new create ]
   rate_limit to: 10, within: 3.minutes, only: :create, with: -> { redirect_to new_session_path, alert: "Try again later." }
 
+  # Also throttle per account, so rotating source addresses cannot brute-force one password.
+  rate_limit to: 10, within: 3.minutes, only: :create, name: :account,
+    by: -> { params[:email_address].to_s.strip.downcase },
+    with: -> { redirect_to new_session_path, alert: "Try again later." }
+
   def new
   end
 

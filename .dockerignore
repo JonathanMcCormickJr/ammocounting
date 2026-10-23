@@ -49,3 +49,14 @@
 # Ignore Docker-related files
 /.dockerignore
 /Dockerfile*
+
+# Ignore ledger_core build outputs (the image builds its own with Alire).
+/ledger_core/obj
+/ledger_core/lib
+/ledger_core/alire
+/ledger_core/config
+/ledger_core/tests/obj
+/ledger_core/tests/bin
+/ledger_core/tests/alire
+/ledger_core/tests/config
+/coverage

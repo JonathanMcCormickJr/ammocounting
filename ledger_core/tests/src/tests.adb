@@ -6,6 +6,7 @@ with Test_Builders;
 with Test_C_API;
 with Test_Cost_Basis;
 with Test_Display;
+with Test_Economics;
 with Test_Holdings;
 with Test_Prices;
 with Test_Quotes;
@@ -18,6 +19,7 @@ begin
    Test_Arithmetic;
    Test_Transactions;
    Test_Quotes;
+   Test_Economics;
    Test_Holdings;
    Test_Builders;
    Test_Running;

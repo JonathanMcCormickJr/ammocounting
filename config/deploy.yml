@@ -20,9 +20,12 @@ servers:
 #
 # Don't use this when deploying to multiple web servers (then you have to terminate SSL at your load balancer).
 #
-# proxy:
-#   ssl: true
-#   host: app.example.com
+# production.rb sets assume_ssl/force_ssl and the host allow-list (APP_HOST below); keep them in step.
+proxy:
+  ssl: true
+  host: app.example.com
+  healthcheck:
+    path: /up
 
 # Where you keep your container images.
 registry:
@@ -41,6 +44,9 @@ env:
   secret:
     - RAILS_MASTER_KEY
   clear:
+    # Public host name(s), comma separated; any other Host header is refused (/up excepted).
+    APP_HOST: app.example.com
+
     # Run the Solid Queue Supervisor inside the web server's Puma process to do jobs.
     # When you start using multiple servers, you should split out job processing to a dedicated machine.
     SOLID_QUEUE_IN_PUMA: true
@@ -65,9 +71,15 @@ aliases:
   shell: app exec --interactive --reuse "bash"
   logs: app logs -f
   dbc: app exec --interactive --reuse "bin/rails dbconsole --include-password"
+  # Consistent online snapshot of the ledger database (SQLite is in WAL mode: never cp the file).
+  # Copy storage/backups/production.sqlite3 off the server on a schedule; see docs/DEPLOYMENT.md.
+  backup: app exec --reuse "sh -c 'mkdir -p storage/backups && sqlite3 storage/production.sqlite3 \".backup storage/backups/production.sqlite3\"'"
 
 # Use a persistent storage volume for sqlite database files and local Active Storage files.
-# Recommended to change this to a mounted volume path that is backed up off server.
+# storage/production.sqlite3 holds the ledger: the only data that cannot be recreated.
+# A volume alone is not a backup. Run "bin/kamal backup" on a schedule and copy
+# storage/backups/ off the server (docs/DEPLOYMENT.md). Do not snapshot or cp the live
+# .sqlite3 files: they run in WAL mode.
 volumes:
   - "ammocounting_storage:/rails/storage"
 

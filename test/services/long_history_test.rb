@@ -13,6 +13,8 @@ class LongHistoryTest < ActiveSupport::TestCase
 
   def bulk_history(user, calibers)
     totals = Ledger::Totals.as_of(user)
+    previous_id = Ledger::Totals.row_at(user).id
+    next_id = LedgerTransaction.maximum(:id) + 1
     held = Hash.new(0)
     ledger_rows = []
     trade_rows = []
@@ -30,7 +32,8 @@ class LongHistoryTest < ActiveSupport::TestCase
       kind = sell ? :sell : :buy
       totals = LedgerEngine.apply_transaction(kind, postings, totals)
       held[caliber.id] = LedgerEngine.apply_trade_quantity(held[caliber.id], kind, sell ? 1 : 3)
-      ledger_rows << { user_id: user.id, kind: LedgerEngine::KINDS.fetch(kind), occurred_at: at, description: "bulk" }
+      ledger_rows << { id: next_id + index, previous_id: (index.zero? ? previous_id : next_id + index - 1), user_id: user.id,
+                       kind: LedgerEngine::KINDS.fetch(kind), occurred_at: at, description: "bulk" }
         .merge(LedgerTransaction.totals_attributes(totals))
       postings_rows << postings
       trade_rows << { user_id: user.id, caliber_id: caliber.id, side: LedgerEngine::SIDES.fetch(kind), quantity: sell ? 1 : 3,

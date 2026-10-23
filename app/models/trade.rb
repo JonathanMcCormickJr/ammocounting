@@ -33,6 +33,7 @@ class Trade < ApplicationRecord
   validates :price_centicents, numericality: { only_integer: true, greater_than: 0 }
   validates :value_cents, :spread_cents, :fee_cents, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :occurred_at, presence: true
+  validates :nonce, format: { with: Ledger::NONCE_FORMAT }, allow_nil: true
 
   # Ids of users holding any rounds, in one query (latest trade per user + caliber with rounds left).
   def self.holder_user_ids

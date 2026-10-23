@@ -11,8 +11,9 @@ worth goes up or down. The UI shows each logged-in user their historical
 portfolio value.
 
 > **Status: working first version.** Accounts, trading, the SPARK ledger,
-> statements and history charts are implemented. See [TODO.md](TODO.md) for
-> assumptions awaiting review and what is still needed (notably deployment).
+> statements and history charts are implemented, and the Dockerfile builds the
+> engine into the image (see [Deployment](#deployment)). See [TODO.md](TODO.md)
+> for assumptions awaiting review and what is still open.
 
 ## Design principles
 
@@ -20,9 +21,14 @@ portfolio value.
 threatens correctness, drop the feature.
 
 - Money is stored as **integer cents**. No floating point for money anywhere.
-- Prices are **integer cents per round**. Quantities are whole rounds.
+- Prices are **integer centicents (1/100 cent) per round**, so cheap rounds can
+  move by realistic amounts; a position's value is rounded half-up to whole
+  cents. Quantities are whole rounds.
 - Rails never does arithmetic on money, prices or quantities; the SPARK engine
   does all of it (proved at GNATprove level 4). Rails stores and retrieves integers.
+  An AST-based ratchet test (`test/architecture/no_money_math_test.rb`) fails on
+  arithmetic in the app, and every exception is a justified entry in
+  `test/architecture/math_allowlist.yml`.
 
 ## Architecture
 
@@ -59,14 +65,18 @@ Built with [Alire](https://alire.ada.dev/):
 ```sh
 cd ledger_core
 alr build            # compile
-alr exec -- gnatprove -P ledger_core.gpr --level=2   # prove (GNATprove comes via Alire)
+alr exec -- gnatprove -P ledger_core.gpr --level=4   # prove (GNATprove comes via Alire)
 (cd tests && alr build && ./bin/tests)                # unit tests
 LEDGER_CORE_LIBRARY_TYPE=relocatable alr build        # shared lib for Rails (script/build does this)
 ```
 
 Rails calls the engine in-process through a C-ABI shared library using Ruby
-`ffi`. Rails persists postings in SQLite; the engine validates each transaction
-before it is committed.
+`ffi` (see `ledger_core/ABI.md`). The default path is
+`ledger_core/lib/libLedger_Core.so`; set `LEDGER_CORE_LIB` to load it from
+elsewhere (the Docker image does). The library needs the Ada runtime
+(`libgnat`) next to it or on the loader path; see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Rails persists postings in SQLite; the
+engine validates each transaction before it is committed.
 
 ### Financial statements
 
@@ -81,7 +91,8 @@ separate Rails-side arithmetic, so the statements always agree with the books.
 - **Statement of cash flows** — for a period: opening cash, cash in/out from
   buying and selling ammo and from the initial $1,776 funding, closing cash.
 
-Required consistency (to be proved or tested, see TODO.md):
+Required consistency (proved in the engine where possible, otherwise covered by
+the unit and differential tests; see TODO.md for the proof status):
 
 - The balance sheet balances at every point in time.
 - Net income on the income statement equals the change in retained earnings.
@@ -135,5 +146,14 @@ coverage, SPARK proofs) are mandatory. See [STANDARDS.md](STANDARDS.md).
 
 ## Deployment
 
-The generated `Dockerfile` and Kamal config exist but are untouched. Deployment
-will need the Ada library built into the image; tracked in TODO.md.
+The `Dockerfile` installs Alire and GNAT in a build stage, builds the
+relocatable `ledger_core` library, ships it with its Ada runtime
+(`libgnat`, via an `$ORIGIN` RPATH) and sets `LEDGER_CORE_LIB`. The image is
+x86_64 only. The Kamal config (`config/deploy.yml`) still has the generated
+placeholder name, registry and host.
+
+All state is SQLite files on the `ammocounting_storage` volume. A volume is
+not a backup, and the files must not be copied while the app runs (WAL mode);
+take snapshots with `bin/kamal backup` and copy them off the server.
+
+Details, backup and restore: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

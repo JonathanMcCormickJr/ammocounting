@@ -4,6 +4,7 @@ require_relative "../config/environment"
 require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/scripted_history"
+require_relative "test_helpers/ledger_triggers"
 
 module ActiveSupport
   class TestCase
@@ -14,6 +15,8 @@ module ActiveSupport
 
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
+
+    include LedgerTriggers
 
     # Rate limiting counters live in the cache; isolate tests from each other.
     setup { ActionController::Base.cache_store.clear }

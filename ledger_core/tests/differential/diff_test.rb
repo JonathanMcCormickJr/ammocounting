@@ -8,14 +8,34 @@
 #
 #   ruby ledger_core/tests/differential/diff_test.rb [path/to/libLedger_Core.so]
 #
-# Environment: SEED (default 20260101), ITERATIONS (default 4000).
+# Environment: SEED (default 20260101), ITERATIONS (default 4000 per seed),
+# SEED_COUNT (default 3: SEED, SEED + 1, SEED + 2).
+#
+# Three kinds of checks:
+#  * per-function: the engine against the pure-Ruby reference (module Ref) on
+#    seeded random and boundary inputs;
+#  * economic/flow properties (module Sim): the engine is driven like the Rails
+#    app drives it and its books are compared with an independent Ruby model of
+#    the same user (cash, holdings, market value tracked directly): the ledger's
+#    trading gain equals realized + unrealized computed from that model, equity
+#    never rises on round trips, every trade costs at least a cent;
+#  * audit E3 reproduction (price 149 centicents, spread 0).
+#
+# Behaviour changes vs the first engine (audit): a quote with value 0 is status 1
+# (was Ok), and a trade of positive value costs at least 1 cent (spread is raised
+# to 1 cent when spread and fee both round to 0). The default 50/100 bps
+# configuration is numerically unchanged (its ceiling spread is already >= 1).
 
 require "ffi"
+require_relative "../check_contract_boundary"
 
 LIB = ARGV[0] || ENV["LEDGER_CORE_LIB"] ||
       File.expand_path("../../lib/libLedger_Core.so", __dir__)
 SEED = Integer(ENV.fetch("SEED", "20260101"))
 N = Integer(ENV.fetch("ITERATIONS", "4000"))
+# Every random suite runs once per seed (SEED, SEED + 1, ...).
+SEED_COUNT = Integer(ENV.fetch("SEED_COUNT", "3"))
+SEEDS = Array.new(SEED_COUNT) { SEED + _1 }.freeze
 
 # ---------------------------------------------------------------- engine ---
 module Engine
@@ -27,6 +47,10 @@ module Engine
     engine_version: [[], :int32],
     validate_transaction: [%i[int32 pointer], :int32],
     apply_transaction: [%i[int32 pointer pointer pointer], :int32],
+    apply_deposit: %i[pointer pointer pointer],
+    apply_buy: %i[pointer pointer pointer],
+    apply_sell: %i[pointer pointer pointer],
+    apply_revalue: %i[pointer pointer pointer],
     diff_totals: %i[pointer pointer pointer],
     collapse_kinds: %i[pointer pointer],
     audit_chain: %i[int32 pointer],
@@ -45,6 +69,7 @@ module Engine
     income_statement: %i[pointer int64 pointer],
     cash_flow: %i[pointer int64 int64 pointer],
     period_report: %i[pointer pointer int64 pointer],
+    period_report_checked: %i[pointer pointer pointer pointer],
     split_money: %i[int64 pointer],
     split_price: %i[int64 pointer],
     negate: %i[int64 pointer],
@@ -102,14 +127,25 @@ module Ref
     value > MAX_AMOUNT ? fail_with(RANGE, 1) : [OK, [value]]
   end
 
+  # Spread and fee on a value, with the audit-E3 minimum: a positive value never
+  # trades for free (the spread is raised to 1 cent when spread and fee both
+  # round to 0). Whenever spread_bps > 0 the ceiling already gives >= 1 cent for
+  # a positive value, so the default 50/100 bps configuration is unchanged.
+  def costs_of(value, spread_bps, fee_bps)
+    spread = ceil_div(value, spread_bps, 10_000)
+    fee = rhu(value, fee_bps, 10_000)
+    spread = 1 if value.positive? && (spread + fee).zero?
+    [spread, fee]
+  end
+
   def quote_buy(qty, price, spread_bps, fee_bps, cash)
     status, out = market_value(qty, price)
     value = out.first
     return fail_with(status, 5) unless status == OK
     return fail_with(RANGE, 5) unless (0..MAX_BPS).cover?(spread_bps) && (0..MAX_BPS).cover?(fee_bps)
+    return fail_with(BAD, 5) if value.zero? # audit E5: a zero value is not a quote
 
-    spread = ceil_div(value, spread_bps, 10_000)
-    fee = rhu(value, fee_bps, 10_000)
+    spread, fee = costs_of(value, spread_bps, fee_bps)
     total = value + spread + fee
     return fail_with(RANGE, 5) if total > MAX_AMOUNT
     return fail_with(CASH, 5) if total > cash
@@ -123,10 +159,10 @@ module Ref
     return fail_with(status, 5) unless status == OK
     return fail_with(RANGE, 5) unless (0..MAX_BPS).cover?(spread_bps) && (0..MAX_BPS).cover?(fee_bps)
     return fail_with(RANGE, 5) if held.negative?
+    return fail_with(BAD, 5) if value.zero?
     return fail_with(HOLD, 5) if qty > held
 
-    spread = ceil_div(value, spread_bps, 10_000)
-    fee = rhu(value, fee_bps, 10_000)
+    spread, fee = costs_of(value, spread_bps, fee_bps)
     costs = spread + fee
     return fail_with(PROCEEDS, 5) if costs > value
 
@@ -330,6 +366,54 @@ module Ref
     return [s_flow, zero] unless s_flow == OK
 
     [OK, open_sheet + close_sheet + income + flow]
+  end
+
+  # ---- typed transaction kinds (audit E4). Written from the ABI description,
+  # not from the engine: the (account, side) cells each kind may post to, and
+  # the cell that must be positive. Revalue posts one of two cell pairs.
+  KIND_CELLS = {
+    0 => [[[1, 0], [3, 1]], [1, 0]], # deposit: Dr Cash / Cr Capital
+    1 => [[[2, 0], [5, 0], [1, 1]], [1, 1]], # buy: Dr Holdings, Dr Costs / Cr Cash
+    2 => [[[1, 0], [5, 0], [2, 1]], [2, 1]] # sell: Dr Cash, Dr Costs / Cr Holdings
+  }.freeze
+  REVALUE_GAIN = [[2, 0], [4, 1]].freeze # Dr Holdings / Cr Gain
+  REVALUE_LOSS = [[4, 0], [2, 1]].freeze # Dr Gain / Cr Holdings
+
+  def shape_ok?(kind, postings)
+    cells = postings.map { |account, side, _amount| [account, side] }
+    if kind == 3
+      [REVALUE_GAIN, REVALUE_LOSS].any? { |pair| cells.all? { pair.include?(_1) } && pair.all? { cells.include?(_1) } }
+    else
+      allowed, required = KIND_CELLS.fetch(kind)
+      cells.all? { allowed.include?(_1) } && cells.include?(required)
+    end
+  end
+
+  def apply_typed(kind, postings, prev)
+    zero = [0] * 40
+    status = validate_postings(postings)
+    return [status, zero] unless status == OK
+    return [BAD, zero] unless shape_ok?(kind, postings)
+
+    apply_transaction(kind, postings, prev)
+  end
+
+  # ---- period report reconciled with the cost basis (audit E2). basis =
+  # [realized, basis_at_start, basis_at_end, purchased, consumed]. The report is
+  # [opening sheet (7), closing sheet (7), income (5), flow (4)]: holdings is
+  # index 1 / 8, the income statement's unrealized gain index 15.
+  def period_report_checked(opening, closing, basis)
+    zero = [0] * 23
+    realized, start_basis, end_basis, purchased, consumed = basis
+    return [RANGE, zero] unless [start_basis, end_basis, purchased, consumed].all? { (0..MAX_AGG).cover?(_1) }
+
+    status, report = period_report(opening, closing, realized)
+    return [status, zero] unless status == OK
+
+    unrealized = (report[8] - end_basis) - (report[1] - start_basis) # market - basis, at both ends
+    return [NOREC, zero] if purchased != consumed + end_basis || report[15] != unrealized
+
+    [OK, report]
   end
 
   def apply_trade_quantity(held, side, qty)
@@ -589,7 +673,8 @@ end
 
 # -------------------------------------------------------------- generators --
 class Gen
-  def initialize(seed) = (@r = Random.new(seed))
+  def initialize(seed) = reseed(seed)
+  def reseed(seed) = (@r = Random.new(seed))
 
   def int(range) = @r.rand(range)
   def pick(list) = list[@r.rand(list.size)]
@@ -665,6 +750,20 @@ def kind_postings_set
   when 2 then Ref.build_sell(*sell_quote(true)).last
   else Ref.revalue([GEN.small(0, 10**6)], GEN.small(0, 10**6)).last.drop(3)
   end
+end
+
+TYPED_EXPORTS = { 0 => :apply_deposit, 1 => :apply_buy, 2 => :apply_sell, 3 => :apply_revalue }.freeze
+
+# A posting list built by the reference builders for a random kind: [kind, postings].
+def kinded_postings
+  kind = GEN.int(0..3)
+  set = case kind
+        when 0 then Ref.build_deposit(GEN.small(1, 10**7)).last
+        when 1 then Ref.build_buy(*buy_quote(true)).last
+        when 2 then Ref.build_sell(*sell_quote(true)).last
+        else Ref.revalue([GEN.small(0, 10**6)], GEN.small(0, 10**6)).last.drop(3)
+        end
+  [kind, set.drop(2).each_slice(3).first(set[0])]
 end
 
 def buy_quote(consistent)
@@ -770,14 +869,45 @@ def random_trades
   trades
 end
 
+# Many calibers (including negative codes), 4..45 trades each, sells never exceed the
+# holding, values near qty * price. Valid input: both methods must agree with the reference.
+def random_trades_large
+  calibers = Array.new(GEN.int(3..9)) { GEN.pick([-7, -1, 0, 1, 2, 3, 5, 7, 9, 12, 30, 99]) }.uniq.sort
+  calibers.flat_map do |caliber|
+    held = 0
+    time = GEN.int(0..30)
+    price = GEN.int(50..5000)
+    Array.new(GEN.int(4..45)) do
+      time += GEN.pick([0, 0, 1, 2, 7])
+      price = [price + GEN.int(-300..300), 50].max
+      if held < 2 || GEN.chance(52)
+        qty = GEN.pick([1, 2, 10, 50, GEN.small(1, 2000)])
+        held += qty
+        [caliber, 0, qty, Ref.rhu(qty, price, 100) + GEN.pick([0, 0, 0, 1, 40]), time]
+      else
+        qty = GEN.chance(15) ? held : GEN.small(1, held)
+        held -= qty
+        [caliber, 1, qty, Ref.rhu(qty, price, 100), time]
+      end
+    end
+  end
+end
+
 # ------------------------------------------------------------------- tests --
 def status_and(mem_out, status, count)
   [status, mem_out ? Wire.read_i64s(mem_out, count) : []]
 end
 
-check("engine_version", [], Engine.engine_version, 200)
+check("engine_version", [], Engine.engine_version, 300)
 
-N.times do
+# Audit E9: no subprogram called by the C shim has a Pre (contracts are compiled out), and no
+# pragma Assume/Annotate/Suppress. See check_contract_boundary.rb.
+check("contract boundary", [], ContractBoundary.violations(File.expand_path("../../src", __dir__)), [])
+
+current_seed = nil
+SEEDS.flat_map { |seed| Array.new(N, seed) }.each do |seed|
+  GEN.reseed(current_seed = seed) unless seed == current_seed
+
   # ---- quotes
   qty = GEN.near(0, MAX_QTY)
   price = GEN.near(0, MAX_PRICE)
@@ -861,6 +991,17 @@ N.times do
   want = set_count == postings.size ? Ref.apply_transaction(kind, postings, prev) : [BAD, [0] * 40]
   check("apply_transaction", [kind, postings, prev, set_count], [eng, Wire.read_totals(nxt)], want)
 
+  # typed entry points: the kind is implied by the export and the postings must have its shape
+  typed = GEN.int(0..3)
+  prev = any_totals
+  real_kind, postings = kinded_postings
+  typed = real_kind if GEN.chance(60) # mostly the right kind, sometimes a mislabelled one
+  postings = random_postings if GEN.chance(10)
+  nxt = Wire.out(40)
+  eng = Engine.public_send(TYPED_EXPORTS.fetch(typed), Wire.posting_set(postings), Wire.totals(prev), nxt)
+  check("apply_#{TYPED_EXPORTS.fetch(typed).to_s.delete_prefix('apply_')}", [postings, prev],
+        [eng, Wire.read_totals(nxt)], Ref.apply_typed(typed, postings, prev))
+
   to = any_totals
   from = GEN.chance(50) ? random_totals : to.map(&:dup)
   from = to.map { |d, c| [[d - GEN.int(0..3), 0].max, [c - GEN.int(0..3), 0].max] } if GEN.chance(30)
@@ -888,6 +1029,26 @@ N.times do
   eng = Engine.period_report(Wire.totals(opening), Wire.totals(closing), realized, out)
   check("period_report", [opening, closing, realized], [eng, Wire.read_i64s(out, 23)],
         Ref.period_report(opening, closing, realized))
+
+  # reconciled with a cost basis report: random reports mostly disagree with the ledger, so
+  # also feed the exact split the ledger implies (the realized/unrealized pair that does reconcile)
+  basis = [realized, GEN.near(0, MAX_AGG, outside: 8), GEN.near(0, MAX_AGG, outside: 8), 0, 0]
+  basis[4] = GEN.near(0, MAX_AGG, outside: 8)
+  basis[3] = GEN.chance(60) ? i64(basis[4] + basis[2]) : GEN.near(0, MAX_AGG, outside: 8)
+  want_status, want_report = Ref.period_report(opening, closing, 0)
+  if want_status == OK && GEN.chance(70)
+    gain = want_report[16] # trading gain total of the period
+    basis[1] = GEN.small(0, 10**6)
+    basis[2] = GEN.small(0, 10**6)
+    basis[0] = gain - ((want_report[8] - basis[2]) - (want_report[1] - basis[1])) # makes the split reconcile
+    basis[4] = GEN.small(0, 10**6)
+    basis[3] = basis[4] + basis[2]
+  end
+  basis = basis.map { i64(_1) }
+  out = Wire.out(23)
+  eng = Engine.period_report_checked(Wire.totals(opening), Wire.totals(closing), Wire.i64s(basis), out)
+  check("period_report_checked", [opening, closing, basis], [eng, Wire.read_i64s(out, 23)],
+        Ref.period_report_checked(opening, closing, basis))
 
   # ---- reports (from the five account totals / activity)
   sums = Array.new(5) { [GEN.totals_cell(MAX_AGG), GEN.totals_cell(MAX_AGG)] }
@@ -942,6 +1103,18 @@ N.times do
   eng = Engine.cost_basis(method, trades.size, Wire.trades(trades), t_start, t_end, out)
   check("cost_basis", [method, trades, t_start, t_end], [eng, Wire.read_i64s(out, 5)],
         Ref.cost_basis(method, trades, t_start, t_end))
+
+  # larger, mixed-caliber histories (valid sells, realistic values), both methods, several windows
+  trades = random_trades_large
+  last_time = trades.empty? ? 0 : trades.map(&:last).max
+  [0, 1].each do |m|
+    t_end = GEN.pick([last_time, GEN.int(0..last_time + 1), last_time + 5])
+    t_start = GEN.pick([0, GEN.int(0..t_end), t_end])
+    out = Wire.out(5)
+    eng = Engine.cost_basis(m, trades.size, Wire.trades(trades), t_start, t_end, out)
+    check("cost_basis large", [m, trades.size, t_start, t_end], [eng, Wire.read_i64s(out, 5)],
+          Ref.cost_basis(m, trades, t_start, t_end))
+  end
 
   # ---- display
   cents = GEN.pick([GEN.near(I64_MIN, I64_MAX, outside: 0), GEN.int(-10**6..10**6), I64_MIN, I64_MAX, 0, -1])
@@ -1019,6 +1192,194 @@ N.times do
   check("ohlc_merge", candles,
         status_and(out, Engine.ohlc_merge(candles.size, Wire.i64s(candles.flatten), out), 6), Ref.ohlc_merge(candles))
 end
+
+# ------------------------------------------------ economic / flow properties --
+# Drives the engine exactly as the Rails app does (quote -> build -> typed apply, revalue on
+# a tick, cost basis, reconciled period report) and checks the books against an independent
+# Ruby model of the same user (cash, holdings and market value tracked directly from the
+# trades), not against the engine's own reports.
+module Sim
+  module_function
+
+  CALIBERS = [1, 2, 7].freeze
+  RATES = [[50, 100], [50, 100], [0, 0], [0, 100], [0, 1], [50, 0], [10, 10], [100, 0]].freeze
+
+  def apply(kind, set_mem, totals)
+    out = Wire.out(40)
+    status = Engine.public_send(TYPED_EXPORTS.fetch(kind), set_mem, Wire.totals(totals), out)
+    [status, Wire.read_totals(out).each_slice(2).to_a]
+  end
+
+  # [status, 7 balance sheet numbers] of running totals, through collapse_kinds like Rails does
+  def sheet(totals)
+    sums = Wire.out(10)
+    status = Engine.collapse_kinds(Wire.totals(totals), sums)
+    return [status, []] unless status == OK
+
+    out = Wire.out(7)
+    [Engine.balance_sheet(sums, out), Wire.read_i64s(out, 7)]
+  end
+
+  def market_values(held, price)
+    CALIBERS.map do |c|
+      out = Wire.out(1)
+      raise "market_value failed" unless Engine.market_value(held[c], price[c], out) == OK
+
+      Wire.read_i64s(out, 1).first
+    end
+  end
+
+  def deposit(state, cents)
+    set = Wire.posting_set([])
+    raise "build_deposit" unless Engine.build_deposit(cents, set) == OK
+
+    status, state[:totals] = apply(0, set, state[:totals])
+    raise "apply_deposit #{status}" unless status == OK
+
+    state[:cash] += cents
+    state[:deposited] += cents
+  end
+
+  def trade(state, caliber, side, qty, rates)
+    price = state[:price][caliber]
+    out = Wire.out(5)
+    if side.zero?
+      status = Engine.quote_buy(qty, price, *rates, state[:cash], out)
+      want = Ref.quote_buy(qty, price, *rates, state[:cash])
+    else
+      status = Engine.quote_sell(qty, state[:held][caliber], price, *rates, out)
+      want = Ref.quote_sell(qty, state[:held][caliber], price, *rates)
+    end
+    quote = Wire.read_i64s(out, 5)
+    check("sim quote", [side, qty, price, rates], [status, quote], want)
+    return unless status == OK
+
+    set = Wire.posting_set([])
+    builder = side.zero? ? :build_buy : :build_sell
+    raise "#{builder} failed" unless Engine.public_send(builder, Wire.i64s(quote), set) == OK
+
+    applied, state[:totals] = apply(side.zero? ? 1 : 2, set, state[:totals])
+    raise "apply failed #{applied}" unless applied == OK
+
+    state[:held][caliber] += side.zero? ? qty : -qty
+    state[:cash] += side.zero? ? -quote[4] : quote[4]
+    state[:costs] += quote[3]
+    state[:trades] << [caliber, side, qty, quote[0], state[:t]]
+  end
+
+  # Marks the holdings to market through the engine and records a snapshot of the books.
+  def tick(state)
+    values = market_values(state[:held], state[:price])
+    carrying = sheet(state[:totals]).last[1]
+    info = Wire.out(3)
+    set = Wire.posting_set([])
+    status = Engine.revalue(values.size, Wire.i64s(values), carrying, info, set)
+    raise "revalue failed #{status}" unless status == OK
+
+    if Wire.read_i64s(info, 3)[2].positive?
+      applied, state[:totals] = apply(3, set, state[:totals])
+      raise "apply_revalue failed #{applied}" unless applied == OK
+    end
+    market = CALIBERS.sum { Ref.rhu(state[:held][_1], state[:price][_1], 100) } # the model's own market value
+    status, books = sheet(state[:totals])
+    check("sim marked to market", [state[:t]], [status, books[0], books[1]], [OK, state[:cash], market])
+    state[:snaps] << { t: state[:t], totals: state[:totals], market: market, cash: state[:cash],
+                       deposited: state[:deposited], costs: state[:costs] }
+  end
+
+  def run(walk:)
+    rates = GEN.pick(RATES)
+    state = { totals: Ref.zero_totals, held: CALIBERS.to_h { [_1, 0] }, price: CALIBERS.to_h { [_1, GEN.int(50..3000)] },
+              cash: 0, deposited: 0, costs: 0, trades: [], t: 0, snaps: [] }
+    state[:snaps] << { t: 0, totals: state[:totals], market: 0, cash: 0, deposited: 0, costs: 0 }
+    state[:t] += 1
+    deposit(state, GEN.int(10_000..400_000))
+    GEN.int(10..70).times do
+      state[:t] += GEN.int(1..4)
+      case GEN.int(0..99)
+      when 0...34 then trade(state, GEN.pick(CALIBERS), 0, GEN.pick([1, 1, 2, 5, 40, 300]), rates)
+      when 34...64 then trade(state, GEN.pick(CALIBERS), 1, GEN.pick([1, 1, 2, 5, 40, 300]), rates)
+      when 64...72 then deposit(state, GEN.int(100..50_000))
+      else
+        state[:price].transform_values! { |p| walk ? (p + GEN.int(-250..250)).clamp(50, 20_000) : p }
+        tick(state)
+      end
+    end
+    state[:t] += 1
+    tick(state)
+    [state, rates]
+  end
+
+  def cost_basis(method, trades, t_start, t_end)
+    ordered = trades.each_with_index.sort_by { |(caliber, _s, _q, _v, time), i| [caliber, time, i] }.map(&:first)
+    out = Wire.out(5)
+    [Engine.cost_basis(method, ordered.size, Wire.trades(ordered), t_start, t_end, out), Wire.read_i64s(out, 5), ordered]
+  end
+
+  def verify(state, rates)
+    snaps = state[:snaps]
+    3.times do
+      i = GEN.int(0...snaps.size)
+      j = GEN.int(i...snaps.size)
+      open_snap = snaps[i]
+      close_snap = snaps[j]
+      method = GEN.int(0..1)
+      status, basis, ordered = cost_basis(method, state[:trades], open_snap[:t], close_snap[:t])
+      check("sim cost_basis", [method, open_snap[:t], close_snap[:t], rates],
+            [status, basis], Ref.cost_basis(method, ordered, open_snap[:t], close_snap[:t]))
+      report_out = Wire.out(23)
+      status = Engine.period_report_checked(Wire.totals(open_snap[:totals]), Wire.totals(close_snap[:totals]),
+                                            Wire.i64s(basis), report_out)
+      # the engine's own split must reconcile with the ledger
+      check("sim period reconciles", [method, i, j, rates], [status], [OK])
+      next unless status == OK
+
+      report = Wire.read_i64s(report_out, 23)
+      realized, start_basis, end_basis = basis
+      # the market value comes from the simulation, not from the ledger or the engine
+      unrealized = (close_snap[:market] - end_basis) - (open_snap[:market] - start_basis)
+      check("sim ledger gain = realized + unrealized (independent market)", [method, i, j, rates],
+            [report[16], report[14], report[15]], [realized + unrealized, realized, unrealized])
+      check("sim closing books = model", [i, j], [report[7], report[8], report[9]],
+            [close_snap[:cash], close_snap[:market], close_snap[:cash] + close_snap[:market]])
+      check("sim opening books = model", [i, j], [report[0], report[1]], [open_snap[:cash], open_snap[:market]])
+      deposits = close_snap[:deposited] - open_snap[:deposited]
+      costs = close_snap[:costs] - open_snap[:costs]
+      check("sim equity change = deposits + gain - costs", [i, j, rates],
+            [report[12] - report[5], report[17], report[18]],
+            [deposits + report[16] - costs, costs, report[16] - costs])
+    end
+  end
+end
+
+SEEDS.each do |seed|
+  GEN.reseed(seed + 1_000_003)
+  (N / 40).times do
+    state, rates = Sim.run(walk: true)
+    Sim.verify(state, rates)
+  end
+
+  # Round trips (audit E3): constant prices, any mix of buys and sells, then mark to market. With
+  # every trade costing at least a cent, equity never ends above what was deposited.
+  (N / 40).times do
+    state, rates = Sim.run(walk: false)
+    final = state[:snaps].last
+    check("sim round trip: equity never rises", [rates, state[:trades].size],
+          [final[:cash] + final[:market] <= final[:deposited]], [true])
+    check("sim every trade costs at least a cent", [rates], [state[:costs] >= state[:trades].size], [true])
+  end
+end
+
+# Audit E3, reproduced: price 149 centicents, spread 0, 1 % fee. 100 one-round buys are booked at
+# 1 cent each, the 100 rounds are worth 149 cents; the buys must cost at least the 49 cent gap.
+e3_costs = 0
+100.times do
+  out = Wire.out(5)
+  status = Engine.quote_buy(1, 149, 0, 100, 10**6, out)
+  e3_costs += Wire.read_i64s(out, 5)[3]
+  check("E3 minimum cost", [], [status, e3_costs.positive?], [OK, true])
+end
+check("E3 free gain closed", [], [Ref.rhu(100, 149, 100) - 100 <= e3_costs], [true])
 
 # A few big, fixed cases that random generation will not reach.
 big_buy = Array.new(100_000) { [1, 0, 1, MAX_AMOUNT, 1] }

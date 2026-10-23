@@ -23,6 +23,19 @@ module Ledger
       Sell.call(@user, @nine, 1000, at: T + 120)
     end
 
+    test "reads everything inside one non-joinable (snapshot) transaction" do
+      trade_history
+      seen = []
+      connection = ApplicationRecord.connection
+      real_sheet = Balances.method(:sheet)
+      real_quantities = Balances.method(:quantities)
+      spy = ->(real) { ->(*args) { seen << connection.current_transaction.joinable?; real.call(*args) } }
+      with_singleton(Balances, :sheet, spy.call(real_sheet)) do
+        with_singleton(Balances, :quantities, spy.call(real_quantities)) { Portfolio.for(@user) }
+      end
+      assert_equal [ false, false ], seen
+    end
+
     test "empty portfolio for a user without history" do
       portfolio = Portfolio.for(@user)
       assert_equal [ 0, 0, 0, [] ], [ portfolio.cash, portfolio.holdings_value, portfolio.net_worth, portfolio.positions ]

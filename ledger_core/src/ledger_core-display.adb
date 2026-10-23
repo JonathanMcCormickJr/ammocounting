@@ -135,7 +135,7 @@ package body Ledger_Core.Display with SPARK_Mode is
       Times := (others => 0);
       Count := 0;
       Step  := 0;
-      if Times'Length = 0 or else Start > Finish then
+      if Times'Length = 0 or else Times'First /= 1 or else Start > Finish then
          Result := Bad_Argument;
       elsif Times'Length > Max_Points
         or else Start < 0 or else Finish > Max_Time
