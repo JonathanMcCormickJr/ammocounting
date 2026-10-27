@@ -153,7 +153,8 @@ and unrealized gain does.
 
 ## Requirements
 
-- Ruby 3.4.11 (see `.ruby-version`), Bundler
+- Ruby 4.0.8 (`.ruby-version` is the single source of truth; the Dockerfile's
+  `RUBY_VERSION` must match it), Bundler
 - SQLite 3
 - Alire and a GNAT toolchain (for `ledger_core`); GNATprove for verification
 
