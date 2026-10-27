@@ -3,6 +3,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-script/build
+scripts/build.sh
 bin/rails db:prepare
 exec bin/rails server "$@"

@@ -10,12 +10,6 @@
 #     schedule: at 5am every day
 
 development: &scheduled
-  price_tick:
-    class: PriceTickJob
-    schedule: every 5 minutes
-  price_rollup:
-    class: PriceRollupJob
-    schedule: every hour at minute 7
   session_cleanup:
     class: SessionCleanupJob
     schedule: every day at 4am

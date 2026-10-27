@@ -98,7 +98,7 @@ module LedgerEngine
     def verify_version!(actual)
       return if actual == EXPECTED_VERSION
 
-      raise LibraryMissing, "ledger_core engine_version is #{actual}, expected #{EXPECTED_VERSION}; rebuild with script/build."
+      raise LibraryMissing, "ledger_core engine_version is #{actual}, expected #{EXPECTED_VERSION}; rebuild with scripts/build.sh."
     end
 
     # Returns the path if the shared library exists, else raises with build instructions.
@@ -106,7 +106,7 @@ module LedgerEngine
       return path if File.exist?(path)
 
       raise LibraryMissing,
-        "ledger_core shared library not found at #{path}. Run script/build " \
+        "ledger_core shared library not found at #{path}. Run scripts/build.sh " \
         "(or: cd ledger_core && LEDGER_CORE_LIBRARY_TYPE=relocatable alr build --validation), " \
         "or set LEDGER_CORE_LIB to its location."
     end

@@ -3,6 +3,11 @@
 module ChartHelper
   CHART_WIDTH = 720
   CHART_HEIGHT = 240
+  # Pixels of empty space above the high and below the low, so the line and its stroke
+  # are never clipped at the edges. Points still scale into 0..CHART_HEIGHT; the viewBox
+  # starts CHART_PADDING above that and ends as far below it (literals: no arithmetic here).
+  CHART_PADDING = 8
+  CHART_VIEWBOX = "0 -8 720 256".freeze # x y width height = 0, -CHART_PADDING, CHART_WIDTH, CHART_HEIGHT + 2 * CHART_PADDING
 
   # points: Array of PriceHistory::Point. Plots closes.
   def price_chart(points)
@@ -11,7 +16,7 @@ module ChartHelper
     extent = LedgerEngine.min_max(points.map(&:close))
     tag.figure(class: "chart") do
       safe_join([
-        tag.svg(viewBox: "0 0 #{CHART_WIDTH} #{CHART_HEIGHT}", role: "img",
+        tag.svg(viewBox: CHART_VIEWBOX, role: "img",
                 "aria-label": "Price #{format_centicents(extent.low)} to #{format_centicents(extent.high)}") do
           tag.polyline(points: chart_coordinates(points, extent.low, extent.high), fill: "none", stroke: "currentColor",
                        "stroke-width": 2, "vector-effect": "non-scaling-stroke")
@@ -26,7 +31,7 @@ module ChartHelper
     extent = LedgerEngine.min_max(points.map(&:value))
     tag.figure(class: "chart") do
       safe_join([
-        tag.svg(viewBox: "0 0 #{CHART_WIDTH} #{CHART_HEIGHT}", role: "img",
+        tag.svg(viewBox: CHART_VIEWBOX, role: "img",
                 "aria-label": "Net worth #{format_cents(extent.low)} to #{format_cents(extent.high)}") do
           tag.polyline(points: chart_coordinates(points, extent.low, extent.high, :value), fill: "none", stroke: "currentColor",
                        "stroke-width": 2, "vector-effect": "non-scaling-stroke")

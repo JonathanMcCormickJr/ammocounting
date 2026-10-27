@@ -9,7 +9,8 @@ class PriceTickTest < ActiveSupport::TestCase
   end
 
   test "floor_time aligns to the interval" do
-    assert_equal Time.utc(2026, 1, 1, 12, 5), PriceTick.floor_time(Time.utc(2026, 1, 1, 12, 9, 59))
+    assert_equal Time.utc(2026, 1, 1), PriceTick.floor_time(Time.utc(2026, 1, 1, 12, 9, 59)), "one tick per game day by default"
+    assert_equal Time.utc(2026, 1, 1, 12, 5), PriceTick.floor_time(Time.utc(2026, 1, 1, 12, 9, 59), interval_minutes: 5)
     assert_equal Time.utc(2026, 1, 1, 12, 0), PriceTick.floor_time(Time.utc(2026, 1, 1, 12, 14), interval_minutes: 15)
   end
 

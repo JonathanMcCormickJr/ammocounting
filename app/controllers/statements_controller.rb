@@ -4,7 +4,7 @@ class StatementsController < ApplicationController
   rescue_from Statements::Invalid, with: :invalid_request
 
   def balance_sheet
-    @as_of = Statements::Period.as_of(params[:as_of], origin: Current.user.history_start)
+    @as_of = Statements::Period.as_of(params[:as_of], origin: Current.user.history_start, now: Current.user.game_time)
     @sheet = Statements::Builder.balance_sheet(Current.user, @as_of)
   end
 
@@ -19,7 +19,7 @@ class StatementsController < ApplicationController
   private
 
   def load_report
-    @report = Statements::Builder.period(Current.user, Statements::Period.parse(params, origin: Current.user.history_start))
+    @report = Statements::Builder.period(Current.user, Statements::Period.parse(params, origin: Current.user.history_start, now: Current.user.game_time))
   end
 
   def invalid_request(error)

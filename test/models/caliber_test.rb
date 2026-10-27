@@ -14,7 +14,7 @@ class CaliberTest < ActiveSupport::TestCase
     assert_equal 15, Caliber.count
     nine = Caliber.find_by!(slug: "9mm")
     assert_equal 2500, nine.starting_price_centicents
-    assert_equal [ Time.utc(2026, 3, 1, 12, 0) ], nine.price_ticks.where(as_of: now.beginning_of_day..).pluck(:as_of)
+    assert_equal [ Time.utc(2026, 3, 1) ], nine.price_ticks.where(as_of: now.beginning_of_day..).pluck(:as_of)
     assert_equal 1, Caliber.find_by!(slug: "12-gauge").price_ticks.count
   end
 

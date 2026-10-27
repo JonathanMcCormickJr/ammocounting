@@ -5,7 +5,9 @@ class DashboardController < ApplicationController
     @user = Current.user
     @portfolio = Ledger::Portfolio.for(@user)
     @calibers = Caliber.ordered
-    @prices = Ledger.latest_prices
+    @prices = Ledger.latest_prices(at: @user.game_time)
+    @event = MarketEvent.current(@user.game_time)
+    @past_events = MarketEvent.started_by(@user.game_time).last(5).reverse
     @range = ChartRange.parse(params[:range])
     @history = NetWorthHistory.series(@user, range: @range)
   end

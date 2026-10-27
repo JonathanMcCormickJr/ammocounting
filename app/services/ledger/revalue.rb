@@ -4,16 +4,17 @@ module Ledger
   # carrying balance (running totals) and builds the Dr/Cr Trading Gain/Loss
   # postings, or none when equal (so calling it twice is harmless).
   class Revalue
-    # prices: { caliber_id => centicents }, default the latest ticks.
-    # Returns the LedgerTransaction, or nil when nothing needed posting.
+    # prices: { caliber_id => centicents }, default the prices at `at` (default: the
+    # user's game time). Returns the LedgerTransaction, or nil when nothing needed posting.
     def self.call(user, prices: nil, at: nil)
       user.with_lock do
-        prices ||= Ledger.latest_prices # read inside the lock: an older tick can never overwrite a newer revaluation
+        at ||= Ledger.now_for(user)
+        prices ||= Ledger.latest_prices(at: at) # read inside the lock: an older tick can never overwrite a newer revaluation
         values = Balances.quantities(user).map { |caliber_id, qty| LedgerEngine.market_value(qty, prices.fetch(caliber_id)) }
         revaluation = LedgerEngine.revalue(values, Balances.sheet(user).holdings)
         next if revaluation.postings.empty?
 
-        Poster.call(user, kind: :revalue, at: at || Ledger.now_for(user), description: "Revalue holdings", postings: revaluation.postings)
+        Poster.call(user, kind: :revalue, at: at, description: "Revalue holdings", postings: revaluation.postings)
       end
     end
 

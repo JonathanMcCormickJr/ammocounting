@@ -20,6 +20,17 @@ class ChartHelperTest < ActionView::TestCase
     assert_includes html, "Low $0.01 / High $0.03"
   end
 
+  test "the viewBox leaves CHART_PADDING pixels above the high and below the low" do
+    padding = ChartHelper::CHART_PADDING
+    assert_equal [ 0, -padding, ChartHelper::CHART_WIDTH, ChartHelper::CHART_HEIGHT + (2 * padding) ],
+      ChartHelper::CHART_VIEWBOX.split.map(&:to_i)
+    values = [ NetWorthHistory::Point.new(at: Time.utc(2026, 1, 1), value: 100), NetWorthHistory::Point.new(at: Time.utc(2026, 1, 2), value: 300) ]
+    [ price_chart([ point(0, 100), point(10, 300) ]), net_worth_chart(values) ].each do |html|
+      assert_includes html, %(viewBox="#{ChartHelper::CHART_VIEWBOX}")
+      assert_includes html, "720,0", "extremes still plot at 0 and CHART_HEIGHT; the padding is outside them"
+    end
+  end
+
   test "flat series draws mid-height" do
     assert_equal "0,120 720,120", chart_coordinates([ point(0, 5), point(5, 5) ], 5, 5)
   end

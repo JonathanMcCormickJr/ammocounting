@@ -137,7 +137,7 @@ library also exports Ada-mangled names that are not part of the ABI.
   memory and fail loudly.
 * Contracts, ghost code and loop invariants are proved, not evaluated at run
   time in the shipped library (`ledger_core/ledger_core.adc`).
-* Proof command (CI and `script/test` run exactly this):
+* Proof command (CI and `scripts/test.sh` run exactly this):
   `cd ledger_core && alr exec -- gnatprove -P ledger_core.gpr --level=4 --warnings=error -j0`
   (all checks proved; no `Assume`, no `Annotate`).
 
@@ -167,7 +167,7 @@ library also exports Ada-mangled names that are not part of the ABI.
   subprogram has a `Pre` contract (contracts are compiled out of the shipped
   library): every argument is checked at run time and reported by a status. This
   is enforced by `ledger_core/tests/check_contract_boundary.rb` (run by
-  `diff_test.rb`, hence by `script/test` and CI).
+  `diff_test.rb`, hence by `scripts/test.sh` and CI).
 * Pointers (continued): A NULL pointer where one is required
   gives status 1 (`Bad_Argument`). Arrays are pointer + `int32` count; the
   engine only reads input arrays. For an array argument with count 0 the

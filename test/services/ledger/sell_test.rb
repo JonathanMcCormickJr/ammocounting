@@ -86,7 +86,7 @@ module Ledger
     test "a trade worth nothing (engine quote status 1) is a friendly refusal and writes nothing" do
       PriceTick.create!(caliber: @nine, price_centicents: 1, as_of: Time.utc(2100, 1, 1))
       assert_no_difference [ "Trade.count", "LedgerTransaction.count" ] do
-        error = assert_raises(Refused) { Sell.call(@user, @nine, 1) }
+        error = assert_raises(Refused) { Sell.call(@user, @nine, 1, at: Time.utc(2100, 1, 1)) }
         assert_equal "This trade is too small to price. Try a larger quantity.", error.message
       end
     end

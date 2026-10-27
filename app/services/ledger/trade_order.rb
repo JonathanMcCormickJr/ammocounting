@@ -36,7 +36,7 @@ module Ledger
         raise Replay, replay if replay
 
         @at ||= Ledger.now_for(@user)
-        prices = Ledger.latest_prices
+        prices = Ledger.latest_prices(at: @at)
         price = prices[@caliber.id] || raise(Refused, "No price is available for #{@caliber.name}.")
         Revalue.call(@user, prices: prices, at: @at)
         execute(qty, price)

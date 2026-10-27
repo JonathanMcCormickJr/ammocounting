@@ -83,8 +83,8 @@ class NoMoneyMathTest < ActiveSupport::TestCase
     "config/environments/staging.rb" => "x = a - b\n",
     "db/migrate/20260101000000_backfill.rb" => "class Backfill\n  def up = execute(\"UPDATE t SET a = a + 1\")\nend\n",
     "db/seeds.rb" => "grant = base * 2\n",
-    "script/tool.rb" => "x = a + b\n",
-    "script/tool" => "#!/usr/bin/env ruby\nx = a + b\n",
+    "scripts/tool.rb" => "x = a + b\n",
+    "scripts/tool" => "#!/usr/bin/env ruby\nx = a + b\n",
     "config.ru" => "x = a + b\n"
   }.freeze
 
@@ -121,10 +121,10 @@ class NoMoneyMathTest < ActiveSupport::TestCase
     YAML.safe_load_file(ALLOWLIST).each { |entry| assert Rails.root.join(entry["file"]).exist?, entry["file"] }
   end
 
-  test "the scanner covers app, lib, config, db, script and the Ruby files of views" do
+  test "the scanner covers app, lib, config, db, scripts and the Ruby files of views" do
     files = scanner.default_files.map { Pathname(_1).relative_path_from(Rails.root).to_s }
     %w[app/models/user.rb app/views/dashboard/show.html.erb app/javascript/application.js
-       config/initializers/ledger.rb config/environments/production.rb db/migrate/20261023000100_create_ledger.rb].each do |path|
+       config/routes.rb config/environments/production.rb db/migrate/20261023000100_create_ledger.rb].each do |path|
       assert_includes files, path
     end
     assert(files.none? { _1.start_with?("test/", "ledger_core/", "vendor/") })
@@ -255,7 +255,7 @@ class NoMoneyMathTest < ActiveSupport::TestCase
   end
 
   test "a script without a shebang or a ruby extension is not scanned, and empty files are fine" do
-    scan_sources("script/run" => "#!/usr/bin/env bash\nx=$((a + b))\n", "script/empty" => "", "script/.keep" => "\n") do |scanner|
+    scan_sources("scripts/run.sh" => "#!/usr/bin/env bash\nx=$((a + b))\n", "scripts/empty" => "", "scripts/.keep" => "\n") do |scanner|
       assert_empty scanner.violations
     end
   end

@@ -10,7 +10,7 @@ class PriceIndexMockTest < ActiveSupport::TestCase
     assert_equal %i[as_of caliber_id price_centicents slug], quote.keys.sort
     assert_equal calibers(:nine_mm).id, quote[:caliber_id]
     assert_equal "9mm", quote[:slug]
-    assert_equal Time.utc(2026, 5, 1, 12, 5), quote[:as_of]
+    assert_equal Time.utc(2026, 5, 1), quote[:as_of]
     assert_kind_of Integer, quote[:price_centicents]
   end
 
@@ -44,7 +44,7 @@ class PriceIndexMockTest < ActiveSupport::TestCase
   end
 
   test "is idempotent for a tick time that already exists" do
-    PriceTick.create!(caliber: calibers(:nine_mm), price_centicents: 4242, as_of: Time.utc(2026, 5, 1, 12, 5))
+    PriceTick.create!(caliber: calibers(:nine_mm), price_centicents: 4242, as_of: Time.utc(2026, 5, 1))
     quote = PriceIndex::Mock.new(seed: 1).current_prices(now: NOW).first
     assert_equal 4242, quote[:price_centicents]
   end
@@ -68,5 +68,39 @@ class PriceIndexMockTest < ActiveSupport::TestCase
       assert_kind_of Integer, price
       assert_includes 100..100_000, price
     end
+  end
+
+  test "apply_drift is a second engine step with a larger cap, bounded like the walk" do
+    assert_equal 2537, PriceIndex::Mock.apply_drift(2500, 150)
+    assert_equal 2463, PriceIndex::Mock.apply_drift(2500, -150)
+    assert_equal 100_000, PriceIndex::Mock.apply_drift(100_000, 180)
+    assert_equal 100, PriceIndex::Mock.apply_drift(100, -180)
+  end
+
+  EVENT_KIND = MarketEvent::Kind.new(headline: "Crisis", resolution: "Over", ramp_days: 20, slugs: %w[9mm])
+  EVENT = MarketEvent::Event.new(index: 0, kind: EVENT_KIND, starts_at: Time.utc(2026, 1, 5), peak_at: Time.utc(2026, 1, 25),
+    ends_at: Time.utc(2026, 2, 14), drift_bps: 180)
+
+  # Daily prices of 9mm and .22 LR from 2026-01-01 over `days` days, with the given events.
+  def walk(days, events)
+    PriceTick.delete_all
+    Caliber.find_each { |caliber| caliber.price_ticks.create!(as_of: Time.utc(2026, 1, 1), price_centicents: 2500) }
+    with_singleton(MarketEvent, :all, ->(**) { events }) do
+      mock = PriceIndex::Mock.new(seed: 7)
+      (1..days).each { |day| TickRunner.call(now: Time.utc(2026, 1, 1).advance(days: day), index: mock) }
+    end
+    [ calibers(:nine_mm), calibers(:twenty_two) ].map { _1.price_ticks.order(:as_of).pluck(:price_centicents) }
+  end
+
+  test "an event spikes the affected caliber, then the crisis ends and the normal walk continues" do
+    calm_nine, calm_other = walk(60, [])
+    event_nine, event_other = walk(60, [ EVENT ])
+    assert_equal calm_nine.first(4), event_nine.first(4), "nothing happens before the event"
+    assert_operator event_nine[24], :>, calm_nine[24] * 13 / 10, "the spike at the peak"
+    assert_operator event_nine[24], :>, event_nine[3] * 13 / 10
+    assert_operator event_nine[60], :<, event_nine[24] * 8 / 10, "the crisis ended: prices came back down"
+    assert_in_delta calm_nine[60], event_nine[60], calm_nine[60] * 0.3, "back near where the walk would have been"
+    assert_equal calm_other, event_other, "unaffected calibers just walk"
+    assert_not_equal calm_nine.last(10), event_nine.last(10)
   end
 end

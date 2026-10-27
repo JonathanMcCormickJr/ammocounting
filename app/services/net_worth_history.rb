@@ -14,7 +14,7 @@ class NetWorthHistory
   MAX_POINTS = 200
   Point = Data.define(:at, :value)
 
-  def self.series(user, range:, now: Time.current)
+  def self.series(user, range:, now: user.game_time)
     new(user, ChartRange.parse(range), now).series
   end
 

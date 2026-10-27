@@ -19,7 +19,7 @@ module ScriptedHistory
   T4 = Time.utc(2026, 2, 5)
 
   def self.build(user, caliber)
-    user.update_columns(created_at: T0)
+    user.update_columns(created_at: T0, game_time: T4)
     tick = ->(price, at) { PriceTick.create!(caliber: caliber, price_centicents: price, as_of: at) }
     tick.(2500, T0)
     Ledger::Deposit.call(user, 177_600, at: T0, description: "Initial funds")

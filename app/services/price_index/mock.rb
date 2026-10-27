@@ -40,13 +40,20 @@ module PriceIndex
       LedgerEngine.next_price(price, bps, max_step_bps: MAX_STEP_BPS, floor: FLOOR_CENTICENTS, ceiling: CEILING_CENTICENTS)
     end
 
+    # Applies a MarketEvent drift (a second engine step, same bounds, larger step cap).
+    def self.apply_drift(price, bps)
+      LedgerEngine.next_price(price, bps, max_step_bps: MarketEvent::MAX_DRIFT_BPS, floor: FLOOR_CENTICENTS, ceiling: CEILING_CENTICENTS)
+    end
+
     private
 
     def price_for(caliber, last_tick, as_of)
       return last_tick.price_centicents if last_tick && last_tick.as_of >= as_of
 
       base = last_tick ? last_tick.price_centicents : caliber.starting_price_centicents
-      self.class.apply_step(base, step_bps(caliber.id, as_of))
+      walked = self.class.apply_step(base, step_bps(caliber.id, as_of))
+      drift = MarketEvent.drift_bps(caliber.slug, as_of, seed: @seed)
+      drift.zero? ? walked : self.class.apply_drift(walked, drift)
     end
   end
 end

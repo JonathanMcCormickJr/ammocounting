@@ -21,9 +21,19 @@
     coercing every argument to its declared C type (audit F2); the arithmetic is done
     by the engine.
 - file: app/models/price_tick.rb
-  expression: '"(caliber_id, as_of) IN (SELECT caliber_id, MAX(as_of) FROM price_ticks
-    GROUP BY caliber_id)"'
+  expression: '"caliber_id, MAX(as_of)"'
   reason: SQL MAX over tick TIMES (latest tick per caliber), not over prices or money.
+- file: app/models/market_event.rb
+  expression: 'events << Event.new(index: index, kind: kind, starts_at: starts, peak_at: peak, ends_at: peak.advance(days: kind.ramp_days), drift_bps: random.rand(DRIFT_BPS))'
+  reason: Appends a scheduled event to an Array (array building); the event dates are calendar
+    advances and the drift is a random pick from a literal range, not price math (the engine
+    applies it in PriceIndex::Mock).
+- file: app/models/market_event.rb
+  expression: index.succ
+  reason: Counts the scheduled events (an event number used to seed its random draws), not money.
+- file: app/services/timeline.rb
+  expression: PriceTick.maximum(:as_of)
+  reason: Latest tick TIME (the end of the generated price world), not a price or money.
 - file: app/models/price_tick.rb
   expression: interval_minutes * 60
   reason: 'Tick interval alignment: converts a configured number of minutes to seconds
@@ -56,12 +66,9 @@
   expression: now - 1.year
   reason: Calendar offset back from now (Time minus Duration), as in 1.month.ago.
 - file: app/services/ledger.rb
-  expression: Time.current.floor
-  reason: Time truncated to whole seconds (the ledger timestamp resolution); time,
+  expression: user.game_time.utc.floor
+  reason: Game time truncated to whole seconds (the ledger timestamp resolution); time,
     not money.
-- file: app/services/ledger.rb
-  expression: TickRunner.after_tick << TICK_HOOK
-  reason: Registers a callback in an Array (array building, not arithmetic).
 - file: app/services/net_worth_history.rb
   expression: now.utc.floor
   reason: Time truncated to whole seconds (the ledger timestamp resolution); time,

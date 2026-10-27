@@ -16,8 +16,11 @@ module Ammocounting
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
 
-    # Price tick cadence. config/recurring.yml must schedule PriceTickJob at the same interval.
-    config.x.tick_interval_minutes = 5
+    # The game: one price tick per game day. Prices exist only up to the furthest
+    # game time any player has fast-forwarded to (Timeline extends them on demand).
+    config.x.tick_interval_minutes = 1440
+    # Every player starts on this game date (the db default of users.game_time must match).
+    config.x.game_start = Time.utc(2026, 1, 1)
     # Which PriceIndex implementation supplies prices (:mock is the only one so far).
     config.x.price_index = :mock
     # Seed for the deterministic mock random walk.

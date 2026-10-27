@@ -100,10 +100,44 @@ anything you disagree with. Nothing is committed; all changes are in the working
 23. **`.rubocop.yml` now excludes `ledger_core/**`** (the Ruby differential test there
     gave 591 offenses). Revert if you'd rather lint it.
 24. **Differential test** (`ledger_core/tests/differential/diff_test.rb`, ~443k
-    checks against pure-Ruby reference) runs in `script/test` and CI.
+    checks against pure-Ruby reference) runs in `scripts/test.sh` and CI.
 25. **`next_price` semantics** keep the old Ruby behavior,
     `price + trunc(price × bps / 10000)`, which differs from price × (10000+bps)/10000
     for downward moves.
+
+### Game framing: per-player game clock (2026-10-27)
+
+The app is now a turn-based game (see README "The game clock" and "Market events").
+Supersedes decisions 1 and 21 (5-minute ticks; wall-clock writers) and the real-time tick job.
+
+26. **Per-player clock, shared price world.** `users.game_time` (default
+    `config.x.game_start` = 2026-01-01; the migration's db default must match) is the
+    only clock the app reads. `Ledger.now_for` returns it; prices, portfolio, statements,
+    charts and the caliber pages are all "as of" it. `Timeline.extend_to` generates the
+    shared seeded price history lazily, one tick per game day (`tick_interval_minutes = 1440`).
+27. **Fast-forward** (`FastForward`, `ClocksController`): fixed one-way jumps (day, week,
+    month, quarter, year), at most a year at a time, game ends 128 years after the start.
+    Inside the user lock it extends prices, revalues the player's holdings at every game day
+    passed (about 365 ledger rows per holder per year), then moves the clock; all or nothing.
+    Months advance by calendar (Jan 31 + 1 month = Feb 28, so the day of month can drift).
+28. **Removed:** `PriceTickJob`, `PriceRollupJob`, their `recurring.yml` entries,
+    `Ledger::TICK_HOOK` and the initializer. `PriceRollup` now runs when the timeline is
+    extended. `Ledger::Revalue.all_holders` and `RevalueFailed` are still there but unused
+    (only a test uses them): delete if you agree.
+29. **No future leaks:** `PriceHistory` only returns buckets that end at or before the
+    player's game time (raw ticks fill the rest). `MarketEvent.started_by` hides future events.
+30. **Market events** (`MarketEvent`, `PriceIndex::Mock`): one event 6 to 10 years after the
+    previous (the first after the start), six kinds with headlines, a drift of 1.0 to 1.8% per game day for
+    30 to 90 days, then the reverse for as long, applied as a second engine `next_price` step
+    (no Ruby price math, no engine change). Unwinding returns prices only approximately to
+    where the walk would have been. Political events are one Democratic and one Republican
+    trifecta: reword or drop as you like. Magnitudes are my guesses (up to about 6x for the longest).
+31. **Dev data:** old dev databases are inconsistent with game clocks (rows dated by the wall
+    clock): recreate with `bin/rails db:reset`.
+32. **Known gaps:** the 1D/1W chart ranges now show very few points (daily ticks): the range
+    set should be rethought for a game (e.g. 1M, 1Y, 5Y, 10Y, MAX). A year-long skip is slow for
+    users with holdings (hundreds of transactions). No leaderboard yet. The per-day walk keeps
+    the old +-2% step, which is far more volatile than real ammo prices.
 
 ## Security & correctness audit (2026-10-22)
 
@@ -224,8 +258,8 @@ F=FFI, E=engine, T=tooling/tests/docs.
 - [x] Dashboard (portfolio, trading, net worth chart with 1D/1W/1M/YTD/1Y/MAX)
 - [x] Balance sheet, income statement, statement of cash flows with period picker
 - [x] Mandatory gates: rubocop, brakeman, bundler-audit, importmap audit, 100%
-      line+branch coverage, GNATprove, Ada unit tests; `script/{build,run,test}`
-- [x] `script/test` passes end to end locally (Rails 516 tests, Ada 12742 checks,
+      line+branch coverage, GNATprove, Ada unit tests; `scripts/{build,run,test}.sh`
+- [x] `scripts/test.sh` passes end to end locally (Rails 516 tests, Ada 12742 checks,
       1444 proofs)
 
 ## Next

@@ -10,7 +10,7 @@ class TickRunnerTest < ActiveSupport::TestCase
       ticks = TickRunner.call(now: NOW)
       assert_equal 2, ticks.size
     end
-    assert_equal Time.utc(2026, 5, 1, 12, 5), calibers(:nine_mm).latest_tick.as_of
+    assert_equal Time.utc(2026, 5, 1), calibers(:nine_mm).latest_tick.as_of
   end
 
   test "is idempotent for the same tick time" do
@@ -43,7 +43,7 @@ class TickRunnerTest < ActiveSupport::TestCase
   end
 
   test "an existing tick is skipped, never overwritten and never an error" do
-    PriceTick.create!(caliber: calibers(:nine_mm), price_centicents: 4242, as_of: Time.utc(2026, 5, 1, 12, 5))
+    PriceTick.create!(caliber: calibers(:nine_mm), price_centicents: 4242, as_of: Time.utc(2026, 5, 1))
     ticks = nil
     assert_difference "PriceTick.count", 1 do
       ticks = TickRunner.call(now: NOW)
@@ -52,11 +52,6 @@ class TickRunnerTest < ActiveSupport::TestCase
     assert_equal 4242, calibers(:nine_mm).latest_tick.price_centicents
   end
 
-  test "the ledger revaluation hook is registered at boot" do
-    # other tests clear the list in teardown; the registration itself is idempotent
-    Ledger.register_tick_hook
-    assert_includes TickRunner.after_tick, Ledger::TICK_HOOK
-  end
 
   test "after_tick callables receive the stored ticks" do
     received = []
@@ -69,6 +64,6 @@ class TickRunnerTest < ActiveSupport::TestCase
     travel_to NOW do
       TickRunner.call
     end
-    assert_equal Time.utc(2026, 5, 1, 12, 5), PriceTick.maximum(:as_of)
+    assert_equal Time.utc(2026, 5, 1), PriceTick.maximum(:as_of)
   end
 end

@@ -19,7 +19,7 @@ runtime image therefore needs no Ada toolchain and no `LD_LIBRARY_PATH`.
 
 `LEDGER_CORE_LIB=/rails/ledger_core/lib/libLedger_Core.so` is set in the image;
 `LedgerEngine` loads that path (the default is `ledger_core/lib/libLedger_Core.so`
-relative to the Rails root, which is where `script/build` puts it in development).
+relative to the Rails root, which is where `scripts/build.sh` puts it in development).
 If the library is missing or cannot load, the app raises an error naming
 `LEDGER_CORE_LIB`.
 

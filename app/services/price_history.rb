@@ -33,7 +33,7 @@ class PriceHistory
 
     resolution = @range.resolution.to_s
     rows = @caliber.price_buckets.where(resolution: resolution, bucket_start: (start - PriceRollup::SPANS.fetch(resolution))..@now)
-      .where(last_as_of: start..).order(:bucket_start)
+      .where(last_as_of: start..@now).order(:bucket_start) # only buckets wholly in the past: the world is ahead of this player
     @last_bucketed = rows.last&.last_as_of # buckets are time ordered, so the last holds the latest tick
     rows.map do |b|
       Point.new(b.bucket_start, b.open_centicents, b.high_centicents, b.low_centicents, b.close_centicents)

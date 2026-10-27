@@ -134,7 +134,7 @@ basis-point change, `ohlc` / `ohlc_merge` aggregate prices into candles.
 
 ## Proof and test expectations
 
-- `gnatprove` (command in `ABI.md`/`script/test`): every check proved, no
+- `gnatprove` (command in `ABI.md`/`scripts/test.sh`): every check proved, no
   `Assume`, no `Annotate`, no unproved check. SPARK_Mode is on everywhere except
   the C export shim (`Ledger_Core.C_API`), which only compares pointers to NULL,
   views C memory as Ada arrays/records and turns the status into its code.
@@ -148,7 +148,7 @@ basis-point change, `ohlc` / `ohlc_merge` aggregate prices into candles.
   on a subprogram the C shim calls would never be checked against C data. No
   such subprogram has a `Pre`; each validates at run time and returns a status.
   `tests/check_contract_boundary.rb` (run by the differential test, so by
-  `script/test` and CI) fails if one acquires a `Pre`, and if any
+  `scripts/test.sh` and CI) fails if one acquires a `Pre`, and if any
   `pragma Assume/Annotate/Suppress` appears. Aliasing: output memory must not
   overlap input memory; `apply_transaction`, the typed `apply_*` and
   `diff_totals` copy their inputs first so an overlap cannot bypass a check

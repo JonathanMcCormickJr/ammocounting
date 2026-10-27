@@ -109,9 +109,9 @@ class MoneyMathScanner
 
   private
 
-  # Ruby scripts in script/ (by extension or shebang); the others are shell.
+  # Ruby scripts in scripts/ (by extension or shebang); the others are shell.
   def script_files
-    Dir[@root.join("script/**/*")].select { |path| File.file?(path) && ruby_script?(path) }
+    Dir[@root.join("scripts/**/*")].select { |path| File.file?(path) && ruby_script?(path) }
   end
 
   def ruby_script?(path)

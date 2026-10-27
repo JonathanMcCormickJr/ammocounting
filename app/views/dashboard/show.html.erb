@@ -1,6 +1,20 @@
 <% content_for :title, "Portfolio" %>
 <h1>Portfolio</h1>
 
+<section id="game-clock" aria-label="Game clock">
+  <p>Game date: <strong id="game-date"><%= @user.game_time.to_date %></strong></p>
+  <p>Fast-forward to your next decision (you cannot trade while time passes, and you cannot go back):</p>
+  <div class="fast-forward">
+    <% FastForward::LABELS.each do |jump, label| %>
+      <%= button_to "+#{label}", clock_path(jump: jump), class: "fast-forward-#{jump}" %>
+    <% end %>
+  </div>
+</section>
+
+<% if @event %>
+  <p id="market-news" role="status"><strong>Market news:</strong> <%= @event.news(@user.game_time) %></p>
+<% end %>
+
 <dl class="summary">
   <dt>Cash</dt><dd id="cash" class="num"><%= format_cents(@portfolio.cash) %></dd>
   <dt>Holdings (carrying value)</dt><dd id="holdings-value" class="num"><%= format_cents(@portfolio.holdings_value) %></dd>
@@ -38,6 +52,15 @@
       <% end %>
     </tbody>
   </table></div>
+<% end %>
+
+<% if @past_events.any? %>
+  <h2>Market history</h2>
+  <ul id="market-history">
+    <% @past_events.each do |event| %>
+      <li><%= event.starts_at.to_date %>: <%= event.kind.headline %></li>
+    <% end %>
+  </ul>
 <% end %>
 
 <h2>Trade</h2>

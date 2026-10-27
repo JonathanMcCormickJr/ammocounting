@@ -32,10 +32,11 @@ class CalibersControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "show defaults the range and handles empty data" do
+    users(:one).update!(game_time: Time.utc(2025, 6, 1)) # before any price exists
     sign_in_as(users(:one))
     get caliber_path(calibers(:nine_mm), range: "nonsense")
     assert_response :success
-    assert_select ".ranges a.active", "1D"
+    assert_select ".ranges a.active", "MAX"
     assert_select "p.empty"
   end
 

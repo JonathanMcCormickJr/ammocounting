@@ -4,13 +4,13 @@ These are mandatory. CI enforces them; a red check blocks merge.
 
 ## Scripts
 
-| Script        | Purpose                                                        |
-|---------------|----------------------------------------------------------------|
-| `script/build`| Install gems; build `ledger_core` (static, and the `.so` Rails loads via ffi; override path with `LEDGER_CORE_LIB`) |
-| `script/run`  | Build, prepare the DB, start the Rails server                  |
-| `script/test` | Run **every** mandatory check below; CI runs the same checks   |
+| Script             | Purpose                                                        |
+|--------------------|----------------------------------------------------------------|
+| `scripts/build.sh` | Install gems; build `ledger_core` (static, and the `.so` Rails loads via ffi; override path with `LEDGER_CORE_LIB`) |
+| `scripts/run.sh`   | Build, prepare the DB, start the Rails server                  |
+| `scripts/test.sh`  | Run **every** mandatory check below; CI runs the same checks   |
 
-If `script/test` passes locally, CI should pass.
+If `scripts/test.sh` passes locally, CI should pass.
 
 ## Command output (agents)
 
@@ -18,7 +18,7 @@ Humans and AI agents working in this repo run shell commands with the `rtk `
 prefix (e.g. `rtk bin/rails test`, `rtk alr build`) to condense output and save
 tokens. If a condensed result is unusable (empty when output was clearly
 expected, contradicting the exit code, or garbled), re-run it as `rtk proxy <cmd>`.
-The scripts in `script/` and CI run commands directly, without `rtk`.
+The scripts in `scripts/` and CI run commands directly, without `rtk`.
 
 ## Mandatory checks
 

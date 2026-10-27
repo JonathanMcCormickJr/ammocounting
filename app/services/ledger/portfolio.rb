@@ -18,7 +18,7 @@ module Ledger
     # Reads inside one (deferred, read) transaction: the balance sheet, holdings
     # and trades all come from one database snapshot, never a mix of before and
     # after a concurrent trade.
-    def self.for(user, now: Time.current)
+    def self.for(user, now: user.game_time)
       ApplicationRecord.transaction(joinable: false) do
         sheet = balance_sheet(user, now)
         new(user, sheet, positions_for(user, now))
@@ -36,7 +36,7 @@ module Ledger
       quantities = Balances.quantities(user)
       return [] if quantities.empty?
 
-      prices = Ledger.latest_prices
+      prices = Ledger.latest_prices(at: now)
       trades = user.trades.engine_rows.group_by(&:first)
       Caliber.ordered.where(id: quantities.keys).map do |caliber|
         position(user, caliber, quantities.fetch(caliber.id), prices.fetch(caliber.id), trades.fetch(caliber.id), now)

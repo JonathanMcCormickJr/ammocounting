@@ -29,7 +29,9 @@ threads_count = ENV.fetch("RAILS_MAX_THREADS", 3)
 threads threads_count, threads_count
 
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.
-port ENV.fetch("PORT", 3000)
+# Development and test use 37907 because 3000 is taken on this machine; production keeps
+# 3000, the port Thruster proxies to inside the Docker image.
+port ENV.fetch("PORT", ENV["RAILS_ENV"] == "production" ? 3000 : 37907)
 
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart

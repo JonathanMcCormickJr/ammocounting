@@ -30,7 +30,7 @@ class Caliber < ApplicationRecord
   scope :ordered, -> { order(:position) }
 
   # Idempotent: safe to run any number of times.
-  def self.seed_catalog!(now: Time.current)
+  def self.seed_catalog!(now: Rails.configuration.x.game_start)
     transaction do
       CATALOG.each_with_index do |(name, slug, price), index|
         caliber = find_or_initialize_by(slug: slug)

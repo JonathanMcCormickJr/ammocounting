@@ -17,7 +17,6 @@ module Ledger
       users = [ users(:one), users(:two) ]
       calibers = [ calibers(:nine_mm), calibers(:twenty_two) ]
       step_time = Time.utc(2026, 1, 2)
-      tick_minute = 10
       performed = Hash.new(0)
 
       users.each { |user| fund(user, 5_000 + random.rand(200_000)) }
@@ -37,9 +36,8 @@ module Ledger
         else
           calibers.each do |each|
             price = [ [ Ledger.latest_prices.fetch(each.id) + random.rand(-300..300), 1 ].max, 10**5 ].min
-            PriceTick.create!(caliber: each, price_centicents: price, as_of: Time.utc(2026, 1, 2, 0, 0) + (tick_minute * 60))
+            PriceTick.create!(caliber: each, price_centicents: price, as_of: step_time)
           end
-          tick_minute += 5
           Revalue.all_holders(at: step_time)
           performed[:tick] += 1
         end

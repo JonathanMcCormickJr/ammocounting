@@ -9,6 +9,10 @@ class User < ApplicationRecord
   enum :cost_basis_method, { weighted_average: "weighted_average", fifo: "fifo" },
     default: :weighted_average, validate: true
 
+  # The player's own game clock (UTC). Everything the player sees or does is dated
+  # by it; it moves only forward, via FastForward (see README "The game clock").
+  attribute :game_time, default: -> { Rails.configuration.x.game_start }
+
   normalizes :email_address, with: ->(e) { e.strip.downcase }
 
   validates :email_address, presence: true, uniqueness: true,

@@ -115,6 +115,6 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
   test "unknown range falls back to the default" do
     sign_in_as(users(:one))
     get root_path(range: "bogus")
-    assert_select "nav[aria-label='Net worth range'] a.active", "1D"
+    assert_select "nav[aria-label='Net worth range'] a.active", "MAX"
   end
 end

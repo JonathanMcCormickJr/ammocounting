@@ -6,7 +6,7 @@ class ChartRange
     "YTD" => :daily, "1Y" => :daily, "MAX" => :weekly
   }.freeze
   KEYS = RESOLUTIONS.keys.freeze
-  DEFAULT_KEY = "1D".freeze
+  DEFAULT_KEY = "MAX".freeze
 
   attr_reader :key
 

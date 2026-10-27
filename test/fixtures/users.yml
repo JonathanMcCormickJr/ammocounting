@@ -2,8 +2,10 @@
 
 one:
   email_address: one@example.com
+  game_time: 2026-01-02 00:00:00
   password_digest: <%= password_digest %>
 
 two:
   email_address: two@example.com
+  game_time: 2026-01-02 00:00:00
   password_digest: <%= password_digest %>

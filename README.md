@@ -1,14 +1,37 @@
 # Ammo Counting
 
-A Ruby on Rails web app for tracking a diverse array of ammunition calibers and
-their prices. Ammunition supply and pricing is critically important to national
-security, so the numbers in this app must be right.
+A Ruby on Rails **game** about a diverse array of ammunition calibers and their
+prices. Ammunition supply and pricing is critically important to personal and national
+security. Your job as the player is to maximize your portfolio value over time.
 
 Each user has an account and their own ammo portfolio. Every new user starts
-with **$1,776 USD** to spend on ammunition. Prices for each caliber fluctuate
-over time (simulated), and those fluctuations determine whether a user's net
-worth goes up or down. The UI shows each logged-in user their historical
-portfolio value.
+with **$1,776 USD** to spend on ammunition, on 2026-01-01 of the game calendar.
+Prices for each caliber fluctuate over time (simulated), and those fluctuations
+determine whether a user's net worth goes up or down. The UI shows each
+logged-in user their historical portfolio value.
+
+### The game clock
+
+Time is **turn-based and per player**. Your game date moves only when you
+**fast-forward** (+1 day, week, month, 3 months or 1 year, never more than a year
+at once, and never backwards), simulating a long wait before your next buy/sell
+decision. You cannot trade while time passes: the price path you skipped is revalued
+into your books day by day, so your statements and net worth chart cover it. The game ends 128
+years after the start. Everything you see and do is dated by your own game
+clock (never the wall clock), and other players' clocks do not affect yours.
+
+Every player lives in the **same price world**: one deterministic, seeded price
+history, generated on demand (one tick per game day) only as far as the furthest
+player has reached. You never see prices later than your game date.
+
+### Market events
+
+Every 6 to 10 years, a crisis spikes prices for a readable reason ("The Bubonic
+Plague is back!", "Democrats have been elected to a federal trifecta", "Global
+conflicts have driven a spike in military demand for ammo", ...). Prices climb for
+weeks, then the crisis ends, prices unwind, and the normal random walk continues.
+The dashboard shows the news, and fast-forwarding past an event tells you what
+happened. The schedule is a pure function of the price seed (`MarketEvent`).
 
 > **Status: working first version.** Accounts, trading, the SPARK ledger,
 > statements and history charts are implemented, and the Dockerfile builds the
@@ -67,7 +90,7 @@ cd ledger_core
 alr build            # compile
 alr exec -- gnatprove -P ledger_core.gpr --level=4   # prove (GNATprove comes via Alire)
 (cd tests && alr build && ./bin/tests)                # unit tests
-LEDGER_CORE_LIBRARY_TYPE=relocatable alr build        # shared lib for Rails (script/build does this)
+LEDGER_CORE_LIBRARY_TYPE=relocatable alr build        # shared lib for Rails (scripts/build.sh does this)
 ```
 
 Rails calls the engine in-process through a C-ABI shared library using Ruby
@@ -107,7 +130,8 @@ caliber. It is a stand-in for a real market-data feed, so the Rails app talks to
 it through a narrow in-process Ruby interface (`current_prices` → list of `{caliber, price_cents,
 as_of}`) and could later swap in a real source. Prices follow a seeded random
 walk so runs are reproducible and tests are deterministic. A scheduled Solid
-Queue job ticks the prices (default every 5 minutes), and every user shares one
+Timeline service extends the shared price history, one tick per game day, as
+players fast-forward (there is no scheduled tick job), and every user shares one
 price history.
 
 ### Portfolio history charts
@@ -136,9 +160,9 @@ and unrealized gain does.
 ## Setup, run, test
 
 ```sh
-script/build       # install gems, build ledger_core
-script/run         # build, prepare DB, start the server
-script/test        # every mandatory check (what CI runs)
+scripts/build.sh   # install gems, build ledger_core
+scripts/run.sh     # build, prepare DB, start the server
+scripts/test.sh    # every mandatory check (what CI runs)
 ```
 
 Quality and security gates (brakeman, bundler-audit, rubocop, 100% test

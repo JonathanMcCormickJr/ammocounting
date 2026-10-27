@@ -41,9 +41,6 @@ module Ledger
     end
   end
 
-  # Called after every price tick: revalue everyone holding rounds.
-  TICK_HOOK = ->(_ticks) { Revalue.all_holders }
-
   class << self
     def spread_bps
       Rails.configuration.x.spread_bps
@@ -53,19 +50,11 @@ module Ledger
       Rails.configuration.x.fee_bps
     end
 
-    # The current time in whole seconds: the resolution of ledger timestamps.
-    def now
-      Time.current.floor
-    end
-
-    # The time for an entry made "now" for this user: the clock, but never before
-    # the user's latest ledger row. If the clock stepped backwards the entry goes at
-    # the latest row's time, which keeps the per-user chain chronological (see
-    # Poster) instead of raising and blocking the user. Call inside the user lock.
+    # The time for an entry made "now" by this user: their game clock, which only
+    # moves forward, so the per-user chain stays chronological (see Poster). Call
+    # inside the user lock, which reloads the clock.
     def now_for(user)
-      clock = now
-      latest = Totals.row_at(user)&.occurred_at
-      latest && latest > clock ? latest : clock
+      user.game_time.utc.floor
     end
 
     # A fresh random form nonce (see Replay).
@@ -73,14 +62,9 @@ module Ledger
       SecureRandom.hex(16)
     end
 
-    # { caliber_id => latest price_centicents }
-    def latest_prices
-      PriceTick.latest_by_caliber.transform_values(&:price_centicents)
-    end
-
-    # Idempotent; wired from config/initializers/ledger.rb.
-    def register_tick_hook
-      TickRunner.after_tick << TICK_HOOK unless TickRunner.after_tick.include?(TICK_HOOK)
+    # { caliber_id => price_centicents } as of game time `at` (the newest ticks when nil).
+    def latest_prices(at: nil)
+      PriceTick.latest_by_caliber(at: at).transform_values(&:price_centicents)
     end
   end
 end

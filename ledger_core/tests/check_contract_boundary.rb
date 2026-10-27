@@ -14,7 +14,7 @@
 #
 #   ruby ledger_core/tests/check_contract_boundary.rb [path/to/ledger_core/src]
 #
-# diff_test.rb runs this too, so `script/test` and CI enforce it. Exit status 1
+# diff_test.rb runs this too, so `scripts/test.sh` and CI enforce it. Exit status 1
 # and a message per violation when the rule is broken.
 
 module ContractBoundary

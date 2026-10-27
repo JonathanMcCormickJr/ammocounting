@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS "calibers" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "name" varchar NOT NULL, "slug" varchar NOT NULL, "position" integer DEFAULT 0 NOT NULL, "starting_price_centicents" integer NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL);
 CREATE UNIQUE INDEX "index_calibers_on_slug" ON "calibers" ("slug");
-CREATE TABLE IF NOT EXISTS "users" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "email_address" varchar NOT NULL, "password_digest" varchar NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL, "cost_basis_method" varchar DEFAULT 'weighted_average' NOT NULL);
+CREATE TABLE IF NOT EXISTS "users" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "email_address" varchar NOT NULL, "password_digest" varchar NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL, "cost_basis_method" varchar DEFAULT 'weighted_average' NOT NULL, "game_time" datetime(6) DEFAULT '2026-01-01 00:00:00' NOT NULL);
 CREATE UNIQUE INDEX "index_users_on_email_address" ON "users" ("email_address");
 CREATE TABLE IF NOT EXISTS "ledger_postings" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "ledger_transaction_id" integer NOT NULL, "account" integer NOT NULL, "side" integer NOT NULL, "amount_cents" bigint NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL, CONSTRAINT "fk_rails_575406f954"
 FOREIGN KEY ("ledger_transaction_id")
@@ -68,6 +68,7 @@ BEGIN SELECT RAISE(ABORT, 'trades is append-only (delete refused)'); END;
 CREATE TRIGGER price_ticks_no_update BEFORE UPDATE ON price_ticks
 BEGIN SELECT RAISE(ABORT, 'price_ticks is append-only (update refused)'); END;
 INSERT INTO "schema_migrations" (version) VALUES
+('20261027000100'),
 ('20261023000700'),
 ('20261023000600'),
 ('20261023000500'),

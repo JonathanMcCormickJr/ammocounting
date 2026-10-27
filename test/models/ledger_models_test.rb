@@ -107,7 +107,7 @@ class LedgerModelsTest < ActiveSupport::TestCase
   end
 
   test "engine_rows are time ordered engine-ready rows for the scope" do
-    Ledger::Sell.call(@user, calibers(:nine_mm), 100, at: Time.current.floor + 10)
+    Ledger::Sell.call(@user, calibers(:nine_mm), 100, at: @trade.occurred_at + 10)
     Ledger::Deposit.call(users(:two), 1000)
     rows = @user.trades.engine_rows
     assert_equal [ [ calibers(:nine_mm).id, 0, 1000, 25_500, @trade.occurred_at.to_i ],

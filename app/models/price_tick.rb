@@ -4,10 +4,11 @@ class PriceTick < ApplicationRecord
   validates :price_centicents, numericality: { only_integer: true, greater_than: 0 }
   validates :as_of, presence: true
 
-  # Latest tick per caliber as { caliber_id => PriceTick } in one query.
-  def self.latest_by_caliber
-    where("(caliber_id, as_of) IN (SELECT caliber_id, MAX(as_of) FROM price_ticks GROUP BY caliber_id)")
-      .index_by(&:caliber_id)
+  # Latest tick per caliber as { caliber_id => PriceTick } in one query. With `at`,
+  # the latest tick at or before that game time (later ticks are the future).
+  def self.latest_by_caliber(at: nil)
+    visible = at ? where(as_of: ..at) : all
+    where("(caliber_id, as_of) IN (?)", visible.group(:caliber_id).select("caliber_id, MAX(as_of)")).index_by(&:caliber_id)
   end
 
   # Floors a time to the configured tick interval (UTC epoch aligned).

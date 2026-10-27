@@ -16,7 +16,7 @@ module Ledger
       events = []
       real_prices = Ledger.method(:latest_prices)
       with_singleton(@user, :with_lock, ->(&block) { events << :lock; block.call }) do
-        with_singleton(Ledger, :latest_prices, -> { events << :prices; real_prices.call }) do
+        with_singleton(Ledger, :latest_prices, ->(**args) { events << :prices; real_prices.call(**args) }) do
           Revalue.call(@user)
         end
       end
@@ -28,7 +28,7 @@ module Ledger
       Buy.call(users(:two), calibers(:nine_mm), 10)
       reads = 0
       real_prices = Ledger.method(:latest_prices)
-      with_singleton(Ledger, :latest_prices, -> { reads += 1; real_prices.call }) do
+      with_singleton(Ledger, :latest_prices, ->(**args) { reads += 1; real_prices.call(**args) }) do
         Revalue.all_holders
       end
       assert_equal 2, reads

@@ -43,7 +43,7 @@ module Ledger
       fund(two, 25_883)
       assert Buy.call(two, @nine, 1000)
       assert_equal 0, Balances.sheet(two).cash
-      three = User.create!(email_address: "three@example.com", password: "password123")
+      three = User.create!(email_address: "three@example.com", password: "password123", game_time: users(:one).game_time)
       fund(three, 25_882)
       error = assert_raises(Refused) { Buy.call(three, @nine, 1000) }
       assert_equal "Not enough cash for this purchase.", error.message
@@ -109,7 +109,7 @@ module Ledger
     test "a trade worth nothing (engine quote status 1) is a friendly refusal and writes nothing" do
       PriceTick.create!(caliber: @nine, price_centicents: 1, as_of: Time.utc(2100, 1, 1))
       assert_no_difference [ "Trade.count", "LedgerTransaction.count" ] do
-        error = assert_raises(Refused) { Buy.call(@user, @nine, 1) }
+        error = assert_raises(Refused) { Buy.call(@user, @nine, 1, at: Time.utc(2100, 1, 1)) }
         assert_equal "This trade is too small to price. Try a larger quantity.", error.message
       end
     end
@@ -143,7 +143,7 @@ module Ledger
 
     test "an engine range error is not disguised as a refusal" do
       nine_id = @nine.id
-      with_singleton(Ledger, :latest_prices, -> { { nine_id => 10**7 + 1 } }) do
+      with_singleton(Ledger, :latest_prices, ->(**) { { nine_id => 10**7 + 1 } }) do
         error = assert_raises(LedgerEngine::Error) { Buy.call(@user, @nine, 1) }
         assert_equal :out_of_range, error.status
       end

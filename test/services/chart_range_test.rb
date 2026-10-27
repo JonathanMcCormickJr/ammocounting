@@ -9,8 +9,8 @@ class ChartRangeTest < ActiveSupport::TestCase
     assert_equal "1W", ChartRange.parse("1w").key
     range = ChartRange.new("YTD")
     assert_same range, ChartRange.parse(range)
-    assert_equal "1D", ChartRange.parse("bogus").key
-    assert_equal "1D", ChartRange.parse(nil).key
+    assert_equal "MAX", ChartRange.parse("bogus").key
+    assert_equal "MAX", ChartRange.parse(nil).key
   end
 
   test "new rejects unknown keys" do

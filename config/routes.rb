@@ -10,6 +10,7 @@ Rails.application.routes.draw do
     end
   end
   resources :trades, only: :create
+  resource :clock, only: :create
 
   resources :calibers, only: %i[index show], param: :slug
 

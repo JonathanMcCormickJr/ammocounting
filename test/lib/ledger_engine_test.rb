@@ -19,7 +19,7 @@ class LedgerEngineTest < ActiveSupport::TestCase
   test "resolve_library explains how to build a missing library" do
     error = assert_raises(LedgerEngine::LibraryMissing) { LedgerEngine.resolve_library("/nonexistent/libLedger_Core.so") }
     assert_includes error.message, "/nonexistent/libLedger_Core.so"
-    assert_includes error.message, "script/build"
+    assert_includes error.message, "scripts/build.sh"
     assert_includes error.message, "LEDGER_CORE_LIB"
   end
 
