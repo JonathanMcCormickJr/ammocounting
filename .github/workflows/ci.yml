@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           bundler-cache: true
 
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           bundler-cache: true
 
@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           bundler-cache: true
 
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           bundler-cache: true
 
@@ -123,7 +123,7 @@ jobs:
         run: cd ledger_core && LEDGER_CORE_LIBRARY_TYPE=relocatable alr build --validation
 
       - name: Set up Ruby (differential test)
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
       - name: Install ffi
         run: gem install ffi
 
@@ -147,7 +147,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e1bd6146574da5e0795075b5319b300edb30c5b0 # v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           bundler-cache: true
 
